@@ -12,6 +12,7 @@ if [ -z "${ZIG:-}" ]; then
     fi
 fi
 mkdir -p "$ROOT/build/headless"
+cd "$ROOT"
 if [ -n "${REEDEN_OFFICIAL_CORE:-}" ] && [ -f "${REEDEN_OFFICIAL_CORE}/lib/libflutter_engine.so" ]; then
     ENGINE_LIB_DIR="${REEDEN_OFFICIAL_CORE}/lib"
 else
@@ -22,8 +23,8 @@ else
         -o "$ROOT/build/stub/libflutter_engine.so"
     ENGINE_LIB_DIR="$ROOT/build/stub"
 fi
-"$ZIG" cc -target arm-linux-gnueabihf.2.28 -mcpu=cortex_a7 -ffile-prefix-map="$ROOT"=. -fPIC -pie -O2 -g -Wall -Wextra -Werror -Wno-unused-parameter -DREEDEN_HEADLESS_DIAGNOSTIC \
-    -I"$ROOT/include" -I"$ROOT/src" -I"$ROOT/vendor" -I"$ROOT/tests" \
-    "$ROOT/src/host.c" "$ROOT/src/power_worker.c" "$ROOT/src/display.c" "$ROOT/src/refresh_policy.c" "$ROOT/src/light_panel.c" "$ROOT/src/input.c" "$ROOT/src/codec.c" "$ROOT/vendor/cJSON.c" \
-    -L"$ENGINE_LIB_DIR" -lflutter_engine -lpthread -ldl -lm -o "$ROOT/build/headless/reeden-kindle"
+"$ZIG" cc -target arm-linux-gnueabihf.2.28 -mcpu=cortex_a7 -fPIC -pie -O2 -Wall -Wextra -Werror -Wno-unused-parameter -DREEDEN_HEADLESS_DIAGNOSTIC \
+    -Iinclude -Isrc -Ivendor -Itests \
+    src/host.c src/power_worker.c src/display.c src/refresh_policy.c src/light_panel.c src/input.c src/codec.c vendor/cJSON.c \
+    -L"$ENGINE_LIB_DIR" -lflutter_engine -lpthread -ldl -lm -Wl,--strip-all -o "$ROOT/build/headless/reeden-kindle"
 echo 'Built diagnostic host; not deployed or run'

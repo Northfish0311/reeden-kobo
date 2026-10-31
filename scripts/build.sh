@@ -12,6 +12,7 @@ if [ -z "${ZIG:-}" ]; then
     fi
 fi
 mkdir -p "$ROOT/build" "$ROOT/package/bin" "$ROOT/package/lib"
+cd "$ROOT"
 if [ -n "${REEDEN_OFFICIAL_CORE:-}" ] && [ -f "${REEDEN_OFFICIAL_CORE}/lib/libflutter_engine.so" ]; then
     ENGINE_LIB_DIR="${REEDEN_OFFICIAL_CORE}/lib"
 else
@@ -22,21 +23,48 @@ else
         -o "$ROOT/build/stub/libflutter_engine.so"
     ENGINE_LIB_DIR="$ROOT/build/stub"
 fi
-"$ZIG" cc -target arm-linux-gnueabihf.2.28 -mcpu=cortex_a7 -ffile-prefix-map="$ROOT"=. -fPIC -pie -O2 -g -Wall -Wextra -Werror -Wno-unused-parameter -I"$ROOT/include" -I"$ROOT/src" -I"$ROOT/vendor" \
-    "$ROOT/src/host.c" "$ROOT/src/power_worker.c" "$ROOT/src/display.c" "$ROOT/src/refresh_policy.c" "$ROOT/src/light_panel.c" "$ROOT/src/input.c" "$ROOT/src/codec.c" "$ROOT/vendor/cJSON.c" \
+# Sources are compiled with relative paths and without -g so that neither the
+# DWARF debug info nor the STT_FILE symbol-table entries can embed the
+# build machine's checkout directory, Zig installation path or username.
+# This is required both for privacy and for byte-identical reproduction on CI.
+"$ZIG" cc -target arm-linux-gnueabihf.2.28 -mcpu=cortex_a7 -fPIC -pie -O2 -Wall -Wextra -Werror -Wno-unused-parameter -Iinclude -Isrc -Ivendor \
+    src/host.c src/power_worker.c src/display.c src/refresh_policy.c src/light_panel.c src/input.c src/codec.c vendor/cJSON.c \
     -L"$ENGINE_LIB_DIR" -lflutter_engine -lpthread -ldl -lm -Wl,-rpath,'$ORIGIN/../core/lib:$ORIGIN/../lib' \
-    -o "$ROOT/package/bin/reeden-kindle"
-"$ZIG" cc -target arm-linux-gnueabihf.2.17 -mcpu=cortex_a7 -ffile-prefix-map="$ROOT"=. -O2 -g -Wall -Wextra -Werror -shared -fPIC \
-    "$ROOT/src/path_compat.c" -ldl -Wl,-soname,libreeden_kobo_compat.so -o "$ROOT/package/lib/libreeden_kobo_compat.so"
-"$ZIG" cc -target arm-linux-musleabihf -static -mcpu=cortex_a7 -ffile-prefix-map="$ROOT"=. -O2 -g -Wall -Wextra -Werror "$ROOT/src/fb_guard.c" -o "$ROOT/package/bin/fb-guard"
+    -Wl,--strip-all -o "$ROOT/package/bin/reeden-kindle"
+"$ZIG" cc -target arm-linux-gnueabihf.2.17 -mcpu=cortex_a7 -O2 -Wall -Wextra -Werror -shared -fPIC \
+    src/path_compat.c -ldl -Wl,-soname,libreeden_kobo_compat.so -Wl,--strip-all -o "$ROOT/package/lib/libreeden_kobo_compat.so"
+"$ZIG" cc -target arm-linux-musleabihf -static -mcpu=cortex_a7 -O2 -Wall -Wextra -Werror src/fb_guard.c -Wl,--strip-all -o "$ROOT/package/bin/fb-guard"
 echo "Built Kobo host, path/child-runtime compatibility library and framebuffer guard"
 
-"$ZIG" cc -target arm-linux-gnueabihf.2.17 -mcpu=cortex_a7 -ffile-prefix-map="$ROOT"=. -fPIC -pie -O2 -Wall -Wextra -Werror -I"$ROOT/src" "$ROOT/tests/codec_test.c" "$ROOT/src/codec.c" -o "$ROOT/build/codec-test-armhf"
+"$ZIG" cc -target arm-linux-gnueabihf.2.17 -mcpu=cortex_a7 -fPIC -pie -O2 -Wall -Wextra -Werror -Isrc tests/codec_test.c src/codec.c -Wl,--strip-all -o "$ROOT/build/codec-test-armhf"
 
-"$ZIG" cc -target arm-linux-gnueabihf.2.17 -mcpu=cortex_a7 -ffile-prefix-map="$ROOT"=. -fPIC -pie -O2 -Wall -Wextra -Werror -Wno-unused-parameter -D_GNU_SOURCE -I"$ROOT/include" -I"$ROOT/src" "$ROOT/tests/input_test.c" "$ROOT/src/input.c" -lpthread -o "$ROOT/build/input-test-armhf"
-"$ZIG" cc -target arm-linux-gnueabihf.2.28 -mcpu=cortex_a7 -ffile-prefix-map="$ROOT"=. -fPIC -pie -O2 -Wall -Wextra -Werror "$ROOT/tests/compat_test.c" -ldl -o "$ROOT/build/compat-test-armhf"
+"$ZIG" cc -target arm-linux-gnueabihf.2.17 -mcpu=cortex_a7 -fPIC -pie -O2 -Wall -Wextra -Werror -Wno-unused-parameter -D_GNU_SOURCE -Iinclude -Isrc tests/input_test.c src/input.c -lpthread -Wl,--strip-all -o "$ROOT/build/input-test-armhf"
+"$ZIG" cc -target arm-linux-gnueabihf.2.28 -mcpu=cortex_a7 -fPIC -pie -O2 -Wall -Wextra -Werror tests/compat_test.c -ldl -Wl,--strip-all -o "$ROOT/build/compat-test-armhf"
 
-"$ZIG" cc -target arm-linux-gnueabihf.2.28 -mcpu=cortex_a7 -ffile-prefix-map="$ROOT"=. -fPIC -pie -O2 -Wall -Wextra -Werror -I"$ROOT/include" "$ROOT/tests/runtime_test.c" -L"$ENGINE_LIB_DIR" -lflutter_engine -o "$ROOT/build/runtime-test-armhf"
-"$ZIG" cc -target arm-linux-musleabihf -static -mcpu=cortex_a7 -ffile-prefix-map="$ROOT"=. -O2 -Wall -Wextra -Werror -I"$ROOT/src" "$ROOT/tests/refresh_policy_test.c" "$ROOT/src/refresh_policy.c" -o "$ROOT/build/refresh-policy-test-armhf"
-"$ZIG" cc -target arm-linux-musleabihf -static -mcpu=cortex_a7 -ffile-prefix-map="$ROOT"=. -O2 -Wall -Wextra -Werror -I"$ROOT/src" "$ROOT/tests/power_worker_test.c" "$ROOT/src/power_worker.c" -lpthread -o "$ROOT/build/power-worker-test-armhf"
-"$ZIG" cc -target arm-linux-musleabihf -static -mcpu=cortex_a7 -ffile-prefix-map="$ROOT"=. -O2 -Wall -Wextra -Werror -I"$ROOT/include" -I"$ROOT/src" "$ROOT/tests/display_transaction_test.c" "$ROOT/src/refresh_policy.c" -lpthread -o "$ROOT/build/display-transaction-test-armhf"
+"$ZIG" cc -target arm-linux-gnueabihf.2.28 -mcpu=cortex_a7 -fPIC -pie -O2 -Wall -Wextra -Werror -Iinclude tests/runtime_test.c -L"$ENGINE_LIB_DIR" -lflutter_engine -Wl,--strip-all -o "$ROOT/build/runtime-test-armhf"
+"$ZIG" cc -target arm-linux-musleabihf -static -mcpu=cortex_a7 -O2 -Wall -Wextra -Werror -Isrc tests/refresh_policy_test.c src/refresh_policy.c -Wl,--strip-all -o "$ROOT/build/refresh-policy-test-armhf"
+"$ZIG" cc -target arm-linux-musleabihf -static -mcpu=cortex_a7 -O2 -Wall -Wextra -Werror -Isrc tests/power_worker_test.c src/power_worker.c -lpthread -Wl,--strip-all -o "$ROOT/build/power-worker-test-armhf"
+"$ZIG" cc -target arm-linux-musleabihf -static -mcpu=cortex_a7 -O2 -Wall -Wextra -Werror -Iinclude -Isrc tests/display_transaction_test.c src/refresh_policy.c -lpthread -Wl,--strip-all -o "$ROOT/build/display-transaction-test-armhf"
+
+# Guard: refuse to ship any binary that still embeds an absolute build path.
+# (Runtime paths such as /tmp/reeden-kobo-*.heartbeat are intentional and
+# do not match; only build-machine paths like the Zig installation directory,
+# the checkout directory under /Users or /home, or macOS /private prefixes.)
+for artifact in \
+    "$ROOT/package/bin/reeden-kindle" \
+    "$ROOT/package/bin/fb-guard" \
+    "$ROOT/package/lib/libreeden_kobo_compat.so" \
+    "$ROOT/build/codec-test-armhf" \
+    "$ROOT/build/input-test-armhf" \
+    "$ROOT/build/compat-test-armhf" \
+    "$ROOT/build/runtime-test-armhf" \
+    "$ROOT/build/refresh-policy-test-armhf" \
+    "$ROOT/build/power-worker-test-armhf" \
+    "$ROOT/build/display-transaction-test-armhf"; do
+    if strings "$artifact" | grep -q -E '^/Users/|^/home/|^/private/|zig-macos-aarch64|zig-linux-x86_64|lib/libc/musl|/lib/std/'; then
+        echo "ERROR: $artifact embeds an absolute build path" >&2
+        strings "$artifact" | grep -E '^/Users/|^/home/|^/private/|zig-macos-aarch64|zig-linux-x86_64|lib/libc/musl|/lib/std/' | head -5 >&2
+        exit 1
+    fi
+done
+echo "Path-leak guard: no absolute build paths embedded in any shipped artifact"

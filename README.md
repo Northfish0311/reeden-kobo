@@ -25,6 +25,12 @@
 
 ### 第 2 步：选择任一方式一键安装
 
+> **macOS 提示**：从压缩包解出的脚本带有隔离属性，首次双击 `一键安装-macOS.command` 若被系统拦截，请在「终端」中执行一次：
+> `xattr -d com.apple.quarantine ~/Downloads/reeden-kobo/一键安装-macOS.command`（路径按实际解压位置调整），或右键该文件选择「打开」。
+> 若解压工具丢失了可执行权限，先执行 `chmod +x 一键安装-macOS.command`；也可以直接在「终端」里运行 `python3 install.py --usb`。
+>
+> **网络提示**：依赖包从 `deb.debian.org` 与 `raw.githubusercontent.com` 下载。若下载缓慢或失败，可配置代理后重试；已下载的依赖会缓存在 `cache/` 目录，重复运行不会重新下载。
+
 #### 方式 A：USB 数据线一键安装 / 升级（推荐，免 SSH）
 1. 用 USB 数据线将 Kobo Clara Colour 连接到电脑，在 Kobo 屏幕点击「连接」（电脑出现 `KOBOeReader` 盘符）。
 2. 直接双击运行对应系统的启动脚本：
@@ -43,10 +49,10 @@
 若 Kobo 已开启 KOReader SSH（默认端口 `2222`）或独立 SSH（端口 `2223`）：
 ```sh
 # 全新安装
-python3 install.py --ssh 192.0.2.10 --port 2222
+python3 install.py --ssh 192.168.1.100 --port 2222
 
 # 保留书库、阅读进度与冷暖光设置升级
-python3 install.py --ssh 192.0.2.10 --port 2222 --upgrade
+python3 install.py --ssh 192.168.1.100 --port 2222 --upgrade
 ```
 
 #### 方式 C：仅在电脑生成完整运行包 (`package/`)

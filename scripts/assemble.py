@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""Assemble immutable official core + private runtime; never use symlinks on FAT32."""
+"""Assemble immutable official core + private runtime; never use symlinks on FAT32.
+
+Developer note: end users should use the repository-root install.py instead; this
+script is the developer-oriented assembler that expects fetch_deps.py and
+build_font_fallback.py outputs under build/ and deps/ next to the repository.
+"""
 import hashlib,json,os,pathlib,shutil
 ROOT=pathlib.Path(__file__).resolve().parents[1]
 CORE=pathlib.Path(os.environ['REEDEN_OFFICIAL_CORE'])

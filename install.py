@@ -230,7 +230,7 @@ def extract_deb_pure(deb_path: pathlib.Path, dest_dir: pathlib.Path) -> None:
 
 def assemble_package(core_dir: pathlib.Path, prebuilt_dir: pathlib.Path, dest: pathlib.Path, temp_root: pathlib.Path) -> int:
     cache_dir = ROOT / 'cache'
-    alt_dirs = [ROOT.parent / 'deps', pathlib.Path('/tmp/deps')]
+    alt_dirs = [ROOT.parent / 'deps']
     deb_manifest = json.loads((ROOT / 'vendor/debian-runtime-manifest.json').read_text(encoding='utf-8'))
     font_manifest = json.loads((ROOT / 'vendor/font-manifest.json').read_text(encoding='utf-8'))
 
@@ -434,7 +434,13 @@ def install_to_usb_mount(pkg_dir: pathlib.Path, mount: pathlib.Path, allow_upgra
                 shutil.copytree(old_keep, stage / keep, dirs_exist_ok=True)
 
     stage.rename(dest)
-    shutil.copy2(dest / 'nickelmenu.conf', entry)
+    try:
+        shutil.copy2(dest / 'nickelmenu.conf', entry)
+    except OSError as exc:
+        raise RuntimeError(
+            f'安装文件已写入 {dest}，但写入 NickelMenu 菜单项失败（{exc}）。\n'
+            f'请手动将 {dest / "nickelmenu.conf"} 的内容复制到 {entry} 后即可使用。'
+        ) from exc
     if backup is not None:
         print(f'✅ USB 一键升级完成！原阅读进度、笔记、冷暖光设置和书库已保留（旧版备份于 {backup.name}）。')
     else:
@@ -514,7 +520,7 @@ def main() -> int:
         '--kobo-mount',
         help='手动指定 Kobo USB 挂载根目录（例如 /Volumes/KOBOeReader 或 E:\\）并一键安装',
     )
-    parser.add_argument('--ssh', metavar='HOST', help='通过 Wi-Fi SSH 一键安装到指定 Kobo IP（例如 192.0.2.10）')
+    parser.add_argument('--ssh', metavar='HOST', help='通过 Wi-Fi SSH 一键安装到指定 Kobo IP（例如 192.168.1.100）')
     parser.add_argument('--port', default='2222', help='SSH 端口（KOReader SSH 默认为 2222，独立 SSH 可设为 2223）')
     parser.add_argument('--known-hosts', help='可选 SSH known_hosts 文件路径（启用严格主机密钥校验）')
     parser.add_argument('--identity', help='可选 SSH 私钥文件路径')
@@ -599,7 +605,7 @@ def main() -> int:
                 install_to_usb_mount(pkg_dir, mounts[0], allow_upgrade=True if has_existing else args.upgrade)
                 return 0
             elif choice == '2':
-                host = input('请输入 Kobo 的局域网 IP 地址 (如 192.0.2.10): ').strip()
+                host = input('请输入 Kobo 的局域网 IP 地址 (如 192.168.1.100): ').strip()
                 port = input('请输入 SSH 端口 [默认 2222]: ').strip() or '2222'
                 install_via_ssh(
                     pkg_dir,

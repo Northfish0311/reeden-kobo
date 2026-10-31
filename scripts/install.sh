@@ -36,7 +36,11 @@ if [ -e "$DEST" ]; then
     for keep in userdata storage; do
         if [ -d "$BACKUP/$keep" ]; then
             mkdir -p "$SOURCE/$keep"
-            cp -R "$BACKUP/$keep/." "$SOURCE/$keep/"
+            if ! cp -R "$BACKUP/$keep/." "$SOURCE/$keep/"; then
+                echo "Upgrade failed while copying $keep; restoring previous installation from $BACKUP." >&2
+                mv "$BACKUP" "$DEST"
+                exit 1
+            fi
         fi
     done
 fi
