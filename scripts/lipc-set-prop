@@ -1,0 +1,10 @@
+#!/bin/sh
+# During pre-render warmup Nickel owns the hardware. Do not change its light.
+[ -n "${REEDEN_KOBO_DIR:-}" ] && [ -f "$REEDEN_KOBO_DIR/state/handoff" ] || exit 69
+while [ "$#" -gt 3 ]; do shift; done
+[ "$#" = 3 ] && [ "$1" = com.lab126.powerd ] || exit 64
+case "$3" in ''|*[!0-9]*) exit 64;; esac
+case "$2" in
+  flIntensity) [ "$3" -le 24 ] || exit 64; echo $((($3 * 100 + 12) / 24)) > /sys/class/backlight/mxc_msp430.0/brightness;;
+  *) echo "Unsupported Kobo power property: $2" >&2; exit 69;;
+esac

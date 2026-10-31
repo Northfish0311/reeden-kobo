@@ -1,0 +1,11 @@
+#!/bin/sh
+# Narrow Kindle hardware compatibility; unknown properties explicitly fail.
+while [ "$#" -gt 2 ]; do shift; done
+[ "$#" = 2 ] && [ "$1" = com.lab126.powerd ] || exit 64
+case "$2" in
+  flIntensity) read -r n < /sys/class/backlight/mxc_msp430.0/brightness; echo $(((n * 24 + 50) / 100));;
+  flMaxIntensity) echo 24;;
+  battLevel) cat /sys/class/power_supply/bd71827_bat/capacity;;
+  isCharging) read -r s < /sys/class/power_supply/bd71827_bat/status; case "$s" in Charging|Full) echo 1;; *) echo 0;; esac;;
+  *) echo "Unsupported Kobo power property: $2" >&2; exit 69;;
+esac

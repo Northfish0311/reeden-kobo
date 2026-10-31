@@ -1,0 +1,62 @@
+[
+  {
+    "name": "libglib2.0-0",
+    "version": "2.66.8-1+deb11u4",
+    "url": "https://deb.debian.org/debian/pool/main/g/glib2.0/libglib2.0-0_2.66.8-1+deb11u4_armhf.deb",
+    "sha256": "ac0a5e9864337962322d17d6cacbfbdd5794313ac21f5a462d4c1ee358a82ff8"
+  },
+  {
+    "name": "libffi7",
+    "version": "3.3-6",
+    "url": "https://deb.debian.org/debian/pool/main/libf/libffi/libffi7_3.3-6_armhf.deb",
+    "sha256": "c18d4ad579a4e88f3da20eb523ecc5a850a61bf37091b316c9d3f668cf9838fa"
+  },
+  {
+    "name": "libmount1",
+    "version": "2.36.1-8+deb11u2",
+    "url": "https://deb.debian.org/debian/pool/main/u/util-linux/libmount1_2.36.1-8+deb11u2_armhf.deb",
+    "sha256": "24b12732e5efef368050793044480a36ab536f8c002606f94c3ec88bd7d75213"
+  },
+  {
+    "name": "libblkid1",
+    "version": "2.36.1-8+deb11u2",
+    "url": "https://deb.debian.org/debian/pool/main/u/util-linux/libblkid1_2.36.1-8+deb11u2_armhf.deb",
+    "sha256": "27684b00ba88230ee63a2ed2a04692c1556c387e2a087f43f0b927462f99ba34"
+  },
+  {
+    "name": "libpcre3",
+    "version": "2:8.39-13",
+    "url": "https://deb.debian.org/debian/pool/main/p/pcre3/libpcre3_8.39-13_armhf.deb",
+    "sha256": "8eb7af918cd369c190d1e118f2c2de78182c2560e9a64ced2c5fe8f5ea2c9f40"
+  },
+  {
+    "name": "libselinux1",
+    "version": "3.1-3",
+    "url": "https://deb.debian.org/debian/pool/main/libs/libselinux/libselinux1_3.1-3_armhf.deb",
+    "sha256": "09ea6434e96e35932bb5a1177a757cf8404c02be1bd69b8d87104a5fcf5f296b"
+  },
+  {
+    "name": "libpcre2-8-0",
+    "version": "10.36-2+deb11u1",
+    "url": "https://deb.debian.org/debian/pool/main/p/pcre2/libpcre2-8-0_10.36-2+deb11u1_armhf.deb",
+    "sha256": "9960e2e6b493a2dca84d4ad288072201f4b2eaa9ba6b242b921dad411ee13ce0"
+  },
+  {
+    "name": "zlib1g",
+    "version": "1:1.2.11.dfsg-2+deb11u2",
+    "url": "https://deb.debian.org/debian/pool/main/z/zlib/zlib1g_1.2.11.dfsg-2+deb11u2_armhf.deb",
+    "sha256": "6c30a8d2525b301765c320c2d49dc6c361e1d3cd2ca9225492c2a083e0b74ce4"
+  },
+  {
+    "name": "libgcc-s1",
+    "version": "10.2.1-6",
+    "url": "https://deb.debian.org/debian/pool/main/g/gcc-10/libgcc-s1_10.2.1-6_armhf.deb",
+    "sha256": "4cfff89c7f492090c5988298f9f9419d3464d294c43883800a2ed55676581d26"
+  },
+  {
+    "name": "ca-certificates",
+    "version": "20210119",
+    "url": "https://deb.debian.org/debian/pool/main/c/ca-certificates/ca-certificates_20210119_all.deb",
+    "sha256": "b2d488ad4d8d8adb3ba319fc9cb2cf9909fc42cb82ad239a26c570a2e749c389"
+  }
+]

@@ -1,0 +1,19 @@
+# Build and temporary directories
+/build/
+/package/
+/package-*/
+/cache/
+/work/
+
+# Never commit official Reeden binaries or archives
+Reeden-kindle.zip
+/reeden/
+/official/
+
+# OS & Python artifacts
+.DS_Store
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
