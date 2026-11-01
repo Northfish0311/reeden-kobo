@@ -1,4 +1,4 @@
-# Reeden Kobo 兼容层 (0.7.1 Experimental)
+# Reeden Kobo 兼容层 (0.7.2 Experimental)
 
 在 **Kobo Clara Colour（产品代码 393）** 上原字节运行官方 **Reeden Kindle（同时支持 `1.43.2+791` 与 `1.43.1+780`）** 核心的开源 C 宿主与硬件兼容层。
 
@@ -13,7 +13,7 @@
 - 程序及阅读数据安装在用户分区 `.adds/reeden-kobo`，菜单在 `.adds/nm/reeden-kobo`。不替换固件、系统库或开机启动项，不设置开机自启。运行时需要控制屏幕、触摸、电源和网络；恢复网络时可能回写 `/etc/resolv.conf`，恢复 DNS。
 - 开始前备份重要书籍和笔记。升级会保留旧安装和数据副本，需要足够剩余空间；不要在 Reeden 运行期间升级，也不要在写入时拔线。
 - 默认菜单不再提供开启 SSH 的入口，只保留 **Reeden SSH - Stop** 以便关闭旧版监听服务。可选诊断工具仅允许密钥认证，见 [SSH 说明](docs/SSH.md)。升级不自动终止现有 SSH 会话，旧服务需手动停止或重启设备。
-- [下载 v0.7.1 安装包](https://github.com/SSNQ/reeden-kobo/releases/tag/v0.7.1)。v0.7.0 已被替代；不要混用旧标签自动生成的源码包和新版附件。
+- [下载 v0.7.2 安装包](https://github.com/SSNQ/reeden-kobo/releases/tag/v0.7.2)。v0.7.0 和 v0.7.1 已被替代；不要混用旧标签自动生成的源码包和新版附件。
 
 ### 退出和故障恢复
 
@@ -80,7 +80,7 @@ python3 install.py --official-core /path/to/Reeden-kindle.zip --output package
 
 ---
 
-## 三、核心适配特性 (0.7.1)
+## 三、核心适配特性 (0.7.2)
 
 - **原字节复用官方核心（双版本支持）**：同时支持 **`1.43.2+791`** 与 **`1.43.1+780`**，`libflutter_engine.so`、`libapp.so` 及原始资源保持原字节不变；不修改账号、授权或付费逻辑；禁用 Kindle 自更新覆盖 Kobo 宿主。
 - **墨水屏刷新策略（对齐 KOReader MTK）**：
@@ -91,7 +91,7 @@ python3 install.py --official-core /path/to/Reeden-kindle.zip --output package
 - **前光与冷暖光控制（自适应 `1.43.2+` 原生滑块与 `1.43.1` 叠画滑块）**：
   - **`1.43.2+791`**：直接对接 Reeden 官方 UI 原生新增的「暖光」滑块（`currentAmberLevel` `0..24` 映射至底层 `lm3630a_led/color` `10..0` 反向混光），自动持久化至 `userdata/kobo-light.conf`
   - **`1.43.1+780`**：在「书页中央 → 显示」前光行下方合成硬件「冷暖」控制行（0 最冷 ～ 100 最暖，10% 步进）
-- **电源键锁屏（含 `1.43.2+` 彩色与透明叠底锁屏）、深度休眠与隔夜唤醒保护 (0.7.1)**：
+- **电源键锁屏（含 `1.43.2+` 彩色与透明叠底锁屏）、深度休眠与隔夜唤醒保护 (0.7.2)**：
   - 支持「自定义锁屏画面」（在 `1.43.2+791` 下支持 3/4 通道 **RGB 彩色锁屏封面**与**透明区域叠在当前书页上**），短按电源键锁屏并进入 Linux `mem` 深度休眠（充电时按 MTK 限制仅锁屏关灯、跳过内核深睡），再按直接唤醒回到当前书页
   - 使用独立非 `SIGCHLD` (`__WCLONE`) 监督进程等待休眠脚本，避免与 Dart 3.12.2 全局 `wait()` 回收线程竞争导致唤醒卡死
   - 记录 `preparing / suspended / resuming / complete` 阶段时间戳；准备或唤醒恢复超过 45 秒由 `guardian.sh` 自动恢复 Kobo 原生界面
@@ -137,7 +137,7 @@ python3 install.py --official-core /path/to/Reeden-kindle.zip --output package
 
 ## 六、验证范围与版本发布
 
-[0.7.1 修复与验证](docs/releases/v0.7.1.md) 列出已完成的自动化测试和仍需实体检查的项目。隔离测试及 QEMU 不能替代隔夜休眠和真实功耗测量。
+[0.7.2 修复与验证](docs/releases/v0.7.2.md) 列出已完成的自动化测试和仍需实体检查的项目。隔离测试及 QEMU 不能替代隔夜休眠和真实功耗测量。
 
 新 Release 由标签 CI 构建：标签、源码 ZIP、安装 ZIP 的代码来自同一提交，附件提供 `COMMIT.txt` 和 `SHA256SUMS`。请勿忽略 Experimental 标记。旧历史中的路径及私人示例地址已清理，已有克隆请参阅 [历史清理说明](docs/历史清理.md)。
 

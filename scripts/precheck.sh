@@ -4,7 +4,7 @@
 set -u
 APP=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 
-echo "=== Reeden Kobo 0.7.1 Self-Check ==="
+echo "=== Reeden Kobo 0.7.2 Self-Check ==="
 
 # 1. Model & Firmware
 if [ -f /mnt/onboard/.kobo/version ]; then

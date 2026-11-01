@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Reeden Kobo (0.7.1) One-Click Builder & Installer.
+"""Reeden Kobo (0.7.2) One-Click Builder & Installer.
 
 Combines the verified MIT Kobo compatibility layer with the user's unmodified
 official Reeden Kindle 1.43.1+780 or 1.43.2+791 core and pinned Debian Bullseye ARMHF runtime
@@ -41,7 +41,7 @@ SUPPORTED_CORES = {
     },
 }
 OFFICIAL_LATEST_URL = 'https://download.reeden.app/Reeden/latest/Reeden-kindle.zip'
-PORT_VERSION = '0.7.1-experimental'
+PORT_VERSION = '0.7.2-experimental'
 SUPPORTED_PRODUCT = '393'
 
 
@@ -173,7 +173,7 @@ def resolve_official_core(user_arg: str | None, temp_root: pathlib.Path, auto_do
             cache_zip = ROOT / 'cache' / 'Reeden-kindle.zip'
             cache_zip.parent.mkdir(parents=True, exist_ok=True)
             print(f'[1/4] 正在从 Reeden 官网下载最新安装包 ({OFFICIAL_LATEST_URL}) ...')
-            req = urllib.request.Request(OFFICIAL_LATEST_URL, headers={'User-Agent': 'reeden-kobo-installer/0.7.1'})
+            req = urllib.request.Request(OFFICIAL_LATEST_URL, headers={'User-Agent': 'reeden-kobo-installer/0.7.2'})
             with open_url_with_cert_fallback(req, timeout=180) as resp, cache_zip.open('wb') as out:
                 shutil.copyfileobj(resp, out)
             target = cache_zip
@@ -187,7 +187,7 @@ def resolve_official_core(user_arg: str | None, temp_root: pathlib.Path, auto_do
                 cache_zip = ROOT / 'cache' / 'Reeden-kindle.zip'
                 cache_zip.parent.mkdir(parents=True, exist_ok=True)
                 print(f'[1/4] 正在从 Reeden 官网下载最新安装包 ({OFFICIAL_LATEST_URL}) ...')
-                req = urllib.request.Request(OFFICIAL_LATEST_URL, headers={'User-Agent': 'reeden-kobo-installer/0.7.1'})
+                req = urllib.request.Request(OFFICIAL_LATEST_URL, headers={'User-Agent': 'reeden-kobo-installer/0.7.2'})
                 with open_url_with_cert_fallback(req, timeout=180) as resp, cache_zip.open('wb') as out:
                     shutil.copyfileobj(resp, out)
                 target = cache_zip
@@ -251,7 +251,7 @@ def download_verified(url: str, sha256: str, cache_dir: pathlib.Path, alt_dirs: 
     cache_dir.mkdir(parents=True, exist_ok=True)
     dest = cache_dir / filename
     print(f'      下载依赖: {filename} ...')
-    req = urllib.request.Request(url, headers={'User-Agent': 'reeden-kobo-installer/0.7.1'})
+    req = urllib.request.Request(url, headers={'User-Agent': 'reeden-kobo-installer/0.7.2'})
     with open_url_with_cert_fallback(req, timeout=60) as resp, dest.open('wb') as out:
         shutil.copyfileobj(resp, out)
     if sha256_file(dest) != sha256:
@@ -411,14 +411,7 @@ def assemble_package(
             if src.is_file():
                 src.chmod(0o755)
 
-    (dest / 'nickelmenu.conf').write_text(
-        'menu_item:main:Reeden Kobo (test):cmd_spawn:quiet:exec /mnt/onboard/.adds/reeden-kobo/run.sh\n'
-        'menu_item:main:Reeden Kobo - Check:cmd_output:60000:/mnt/onboard/.adds/reeden-kobo/precheck.sh\n'
-        'menu_item:main:Reeden Kobo - Return Home:cmd_spawn:quiet:exec /mnt/onboard/.adds/reeden-kobo/recover.sh\n'
-        'menu_item:main:Reeden SSH - Stop:cmd_output:8000:/mnt/onboard/.adds/reeden-kobo/reeden-ssh.sh stop\n',
-        encoding='utf-8',
-        newline='\n',
-    )
+    copy_lf_script(ROOT / 'scripts/nickelmenu.conf', dest / 'nickelmenu.conf', 0o644)
     info = {
         'port_version': PORT_VERSION,
         'official_version': official_version,

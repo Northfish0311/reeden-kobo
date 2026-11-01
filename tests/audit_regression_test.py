@@ -113,3 +113,16 @@ with tempfile.TemporaryDirectory(prefix='reeden-ssh-') as tmp:
 r = subprocess.run(['python3', '-c', 'import runpy,sys;sys.version_info=(3,9,0);runpy.run_path(sys.argv[1])', str(ROOT / 'install.py')], capture_output=True, text=True)
 assert r.returncode != 0 and 'Python 3.10' in r.stderr and 'Traceback' not in r.stderr
 print('PASS: USB ENOSPC/promotion/menu rollback and space preflight; current checksums; key-only optional SSH; Python version message')
+
+# NickelMenu cmd_output accepts only 0 < timeout_ms < 10000. Validate the
+# single config used by both assemblers against this external interface.
+menu = (ROOT / 'scripts/nickelmenu.conf').read_text()
+for line in menu.splitlines():
+    fields = line.split(':', 4)
+    assert len(fields) == 5 and fields[0] == 'menu_item'
+    if fields[3] == 'cmd_output':
+        timeout, command = fields[4].split(':', 1)
+        assert 0 < int(timeout) < 10000, line
+        assert command.startswith('/mnt/onboard/.adds/reeden-kobo/')
+assert ':Reeden SSH:' not in menu and 'reeden-ssh.sh start' not in menu
+print('PASS: NickelMenu timeout limits and no default SSH start action')
