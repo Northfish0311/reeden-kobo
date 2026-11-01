@@ -70,7 +70,7 @@ bool display_present(Display *d,const void *pixels,size_t row,size_t height){
         uint8_t *dst=d->pending+y*d->pending_stride;
         if(!d->frames||memcmp(dst,src,d->pending_stride)){memcpy(dst,src,d->pending_stride);changed=true;}
     }
-    if(light_panel_compose(d->pending,d->pending_stride,d->v.xres,d->v.yres))changed=true;
+    if(d->use_light_overlay&&light_panel_compose(d->pending,d->pending_stride,d->v.xres,d->v.yres))changed=true;
     if(changed){uint64_t now=monotonic_ns();if(!d->dirty)d->first_dirty=now;d->dirty=true;d->last_present=now;}
     d->frames++;
     if(d->frames==1){d->full=true;fprintf(stderr,"[display] FIRST_FRAME_RECEIVED\n");}
@@ -179,19 +179,36 @@ int display_wait(Display *d){
     if(result>=0)d->completed_marker=d->marker;
     return result;
 }
-int display_cover(Display *d,const char *path,unsigned width,unsigned height){
-    if(!width||!height||width>4096||height>4096){errno=EINVAL;return -1;}
+int display_cover(Display *d,const char *path,unsigned width,unsigned height,unsigned channels){
+    if(!width||!height||width>4096||height>4096||channels<1||channels>4){errno=EINVAL;return -1;}
     FILE *f=fopen(path,"rb");if(!f)return -1;
-    uint8_t *gray=malloc((size_t)width*height),*bgra=malloc(d->pending_stride*d->v.yres);
-    if(!gray||!bgra){free(gray);free(bgra);fclose(f);errno=ENOMEM;return -1;}
-    bool valid=fread(gray,1,(size_t)width*height,f)==(size_t)width*height&&fgetc(f)==EOF;fclose(f);
-    if(!valid){free(gray);free(bgra);errno=EINVAL;return -1;}
-    memset(bgra,255,d->pending_stride*d->v.yres);
+    size_t total=(size_t)width*height*channels;
+    uint8_t *raw=malloc(total),*bgra=malloc(d->pending_stride*d->v.yres);
+    if(!raw||!bgra){free(raw);free(bgra);fclose(f);errno=ENOMEM;return -1;}
+    bool valid=fread(raw,1,total,f)==total&&fgetc(f)==EOF;fclose(f);
+    if(!valid){free(raw);free(bgra);errno=EINVAL;return -1;}
+    if((channels==2||channels==4)&&d->committed_valid&&d->committed)
+        memcpy(bgra,d->committed,d->pending_stride*d->v.yres);
+    else memset(bgra,255,d->pending_stride*d->v.yres);
     int ox=((int)d->v.xres-(int)width)/2,oy=((int)d->v.yres-(int)height)/2;
     for(unsigned y=0;y<height;y++)for(unsigned x=0;x<width;x++){
         int dx=(int)x+ox,dy=(int)y+oy;if(dx<0||dy<0||dx>=(int)d->v.xres||dy>=(int)d->v.yres)continue;
-        uint8_t g=gray[y*width+x],*p=bgra+dy*d->pending_stride+dx*4;p[0]=p[1]=p[2]=g;p[3]=255;
+        const uint8_t *px=raw+((size_t)y*width+x)*channels;
+        uint8_t sr=px[0],sg=channels>=3?px[1]:px[0],sb=channels>=3?px[2]:px[0];
+        uint8_t sa=channels==2?px[1]:(channels==4?px[3]:255);
+        uint8_t *p=bgra+dy*d->pending_stride+dx*4;
+        if(sa==255){p[0]=sb;p[1]=sg;p[2]=sr;p[3]=255;}
+        else if(sa>0){
+            unsigned inv=255u-sa;
+            unsigned b=sb+((unsigned)p[0]*inv*0x8081u>>23);
+            unsigned g=sg+((unsigned)p[1]*inv*0x8081u>>23);
+            unsigned r=sr+((unsigned)p[2]*inv*0x8081u>>23);
+            p[0]=b>255?255:(uint8_t)b;
+            p[1]=g>255?255:(uint8_t)g;
+            p[2]=r>255?255:(uint8_t)r;
+            p[3]=255;
+        }
     }
-    flush(d,bgra);int result=display_wait(d);free(gray);free(bgra);return result;
+    flush(d,bgra);int result=display_wait(d);free(raw);free(bgra);return result;
 }
 void display_close(Display *d){if(d->mem&&d->hw_state_known){display_wait(d);if(display_inversion(d,false))perror("reset display inversion");}if(d->mem)munmap(d->mem,d->length);if(d->fd>=0)close(d->fd);free(d->pending);free(d->committed);pthread_mutex_destroy(&d->lock);}

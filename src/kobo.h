@@ -11,7 +11,7 @@ typedef struct {
     unsigned frames,marker,refreshes,failures; uint64_t last_refresh; char mode[32];
     uint64_t last_present,first_dirty,request_clean_at,last_clean;
     unsigned clean_refreshes,gray_refreshes,color_refreshes,night_refreshes,last_waveform;
-    unsigned completed_marker; bool hw_inverted,hw_state_known;
+    unsigned completed_marker; bool hw_inverted,hw_state_known,use_light_overlay;
 } Display;
 typedef struct { int id,x,y; bool active,seen,down; double last_x,last_y; } Contact;
 typedef struct {
@@ -25,7 +25,7 @@ void display_flush(Display *);
 void display_full(Display *);
 void display_request_full(Display *,unsigned);
 uint64_t display_deadline(Display *);
-int display_cover(Display *,const char *,unsigned,unsigned);
+int display_cover(Display *,const char *,unsigned,unsigned,unsigned);
 int display_wait(Display *);
 void display_close(Display *);
 int touch_open(Touch *);

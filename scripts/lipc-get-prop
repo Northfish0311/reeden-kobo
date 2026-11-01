@@ -1,11 +1,42 @@
 #!/bin/sh
 # Narrow Kindle hardware compatibility; unknown properties explicitly fail.
 while [ "$#" -gt 2 ]; do shift; done
-[ "$#" = 2 ] && [ "$1" = com.lab126.powerd ] || exit 64
-case "$2" in
-  flIntensity) read -r n < /sys/class/backlight/mxc_msp430.0/brightness; echo $(((n * 24 + 50) / 100));;
-  flMaxIntensity) echo 24;;
-  battLevel) cat /sys/class/power_supply/bd71827_bat/capacity;;
-  isCharging) read -r s < /sys/class/power_supply/bd71827_bat/status; case "$s" in Charging|Full) echo 1;; *) echo 0;; esac;;
-  *) echo "Unsupported Kobo power property: $2" >&2; exit 69;;
+[ "$#" = 2 ] || exit 64
+case "$1:$2" in
+  com.lab126.powerd:flIntensity)
+    read -r n < /sys/class/backlight/mxc_msp430.0/brightness
+    echo $(((n * 24 + 50) / 100))
+    ;;
+  com.lab126.powerd:flMaxIntensity|com.lab126.powerd:maxAmberLevel)
+    echo 24
+    ;;
+  com.lab126.powerd:currentAmberLevel)
+    if [ -n "${REEDEN_KOBO_DIR:-}" ] && [ ! -f "$REEDEN_KOBO_DIR/state/handoff" ] && [ -f "$REEDEN_KOBO_DIR/userdata/kobo-light.conf" ]; then
+      w=$(sed -n 's/^warmth=\([0-9]*\).*/\1/p' "$REEDEN_KOBO_DIR/userdata/kobo-light.conf" | head -n 1)
+      case "$w" in ''|*[!0-9]*) ;; *) [ "$w" -le 100 ] && { echo $(((w * 24 + 50) / 100)); exit 0; };; esac
+    fi
+    read -r n < /sys/class/backlight/lm3630a_led/color
+    [ "$n" -le 10 ] 2>/dev/null || n=10
+    echo $((((10 - n) * 24 + 5) / 10))
+    ;;
+  com.lab126.powerd:battLevel)
+    cat /sys/class/power_supply/bd71827_bat/capacity
+    ;;
+  com.lab126.powerd:isCharging)
+    read -r s < /sys/class/power_supply/bd71827_bat/status
+    case "$s" in Charging|Full) echo 1;; *) echo 0;; esac
+    ;;
+  com.lab126.wifid:cmState)
+    if /sbin/ifconfig wlan0 2>/dev/null | grep -q 'inet addr:'; then echo CONNECTED; else echo NA; fi
+    ;;
+  com.lab126.btfd:BTstate|com.lab126.btfd:BTenable)
+    echo 0
+    ;;
+  com.lab126.btfd:BTflightMode)
+    echo 1
+    ;;
+  *)
+    echo "Unsupported Kobo LIPC property: $1 $2" >&2
+    exit 69
+    ;;
 esac

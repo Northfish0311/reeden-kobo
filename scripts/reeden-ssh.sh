@@ -20,5 +20,5 @@ if [ ! -x "$SERVER" ]; then
 fi
 cd /mnt/onboard/.adds/koreader
 # Reuse KOReader's existing host keys and login mode, without exporting keys.
-# A separate executable name keeps KOReader's SSH stop action from killing it.
-"$SERVER" -E -R -j -k -p "$address:2223" -P "$PIDFILE" -n >> "$APP/diagnostics/ssh/server.log" 2>&1
+# Bind to 2223 on all interfaces so Wi-Fi reconnects do not drop the listener.
+"$SERVER" -E -R -j -k -p 2223 -P "$PIDFILE" -n >> "$APP/diagnostics/ssh/server.log" 2>&1

@@ -5,6 +5,21 @@ while [ "$#" -gt 3 ]; do shift; done
 [ "$#" = 3 ] && [ "$1" = com.lab126.powerd ] || exit 64
 case "$3" in ''|*[!0-9]*) exit 64;; esac
 case "$2" in
-  flIntensity) [ "$3" -le 24 ] || exit 64; echo $((($3 * 100 + 12) / 24)) > /sys/class/backlight/mxc_msp430.0/brightness;;
-  *) echo "Unsupported Kobo power property: $2" >&2; exit 69;;
+  flIntensity)
+    [ "$3" -le 24 ] || exit 64
+    echo $((($3 * 100 + 12) / 24)) > /sys/class/backlight/mxc_msp430.0/brightness
+    ;;
+  currentAmberLevel)
+    [ "$3" -le 24 ] || exit 64
+    raw=$((10 - ($3 * 10 + 12) / 24))
+    echo "$raw" > /sys/class/backlight/lm3630a_led/color || exit 1
+    if [ -d "$REEDEN_KOBO_DIR/userdata" ]; then
+      printf 'warmth=%d\n' $(((10 - raw) * 10)) > "$REEDEN_KOBO_DIR/userdata/kobo-light.conf.tmp" && \
+        mv -f "$REEDEN_KOBO_DIR/userdata/kobo-light.conf.tmp" "$REEDEN_KOBO_DIR/userdata/kobo-light.conf"
+    fi
+    ;;
+  *)
+    echo "Unsupported Kobo power property: $2" >&2
+    exit 69
+    ;;
 esac

@@ -1,7 +1,7 @@
 #!/bin/sh
 set -u
 . "$(dirname -- "$0")/session.sh"
-mkdir -p "$APP/logs" "$STATE" "$APP/cache" "$APP/userdata" "$APP/storage/books" "$APP/userdata/.config" "$APP/userdata/.local/share" "$APP/userdata/.cache"
+mkdir -p "$APP/logs" "$STATE" "$APP/cache" "$APP/userdata" "$APP/storage/books" "$APP/storage/documents" "$APP/storage/screenshots" "$APP/userdata/.config" "$APP/userdata/.local/share" "$APP/userdata/.cache"
 exec >> "$APP/logs/launcher.log" 2>&1
 echo "[launcher] $(date)"
 if [ -d "$STATE/active" ]; then

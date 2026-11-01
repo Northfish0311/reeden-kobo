@@ -1,6 +1,6 @@
 # Reeden Kobo 兼容层 (0.7.0 Experimental)
 
-在 **Kobo Clara Colour（产品代码 393）** 上原字节运行官方 **Reeden Kindle 1.43.1+780** 核心的开源 C 宿主与硬件兼容层。
+在 **Kobo Clara Colour（产品代码 393）** 上原字节运行官方 **Reeden Kindle（同时支持最新 `1.43.2+791` 与 `1.43.1+780`）** 核心的开源 C 宿主与硬件兼容层。
 
 > **合规与版权说明**：本仓库仅包含 MIT 协议的 Kobo 宿主适配代码、预编译适配层二进制及 SIL OFL 开源字体，**不包含任何 Reeden 官方闭源二进制或 Debian 发行版运行库文件**。安装脚本会在本地电脑上结合你自己下载的 `Reeden-kindle.zip`（原字节不改）与 Debian 官方镜像源一键完成组包与安装。
 
@@ -30,15 +30,15 @@
 | **支持设备** | Kobo Clara Colour（产品代码 `393`，MT8113T，1072×1448 32bpp，旋转 `3`） |
 | **已测固件** | `4.46.23836`（ARMHF Linux 4.9.77） |
 | **前置插件** | Kobo 已安装 [NickelMenu](https://pgaskin.net/NickelMenu/)（存在 `/mnt/onboard/.adds/nm/` 目录） |
-| **官方核心** | 自行从 [Reeden 官网](https://reeden.app/cn/download/kindle) 下载 **Kindle 1.43.1+780** (`Reeden-kindle.zip`) |
+| **官方核心** | 支持官网最新 **Kindle `1.43.2+791`** 与 **`1.43.1+780`** (`Reeden-kindle.zip`，可自行下载或由安装脚本自动从官网拉取并校验) |
 | **电脑环境** | macOS / Windows / Linux，安装有 Python 3（仅用标准库，无需安装 Zig、C 编译器或第三方包） |
 
 ---
 
 ## 二、一键安装与升级（普通用户）
 
-### 第 1 步：准备官方包
-从 [Reeden 官方下载页](https://reeden.app/cn/download/kindle) 下载 `Reeden-kindle.zip`（版本 `1.43.1+780`），直接放在本目录或电脑的「下载 (`Downloads`)」文件夹中（无需手动解压）。
+### 第 1 步：准备官方包（或交由脚本自动下载）
+从 [Reeden 官方下载页](https://reeden.app/cn/download/kindle) 下载 `Reeden-kindle.zip`（支持最新 `1.43.2+791` 及 `1.43.1+780`），直接放在本目录或电脑的「下载 (`Downloads`)」文件夹中（无需手动解压）；如果在交互模式下未找到本地包，直接按回车即可由脚本自动从 Reeden 官网拉取最新包并校验 SHA-256。
 
 ### 第 2 步：选择任一方式一键安装
 
@@ -81,16 +81,17 @@ python3 install.py --official-core /path/to/Reeden-kindle.zip --output package
 
 ## 三、核心适配特性 (0.7.0)
 
-- **原字节复用官方核心**：`libflutter_engine.so`、`libapp.so` 及原始资源保持原字节不变；不修改账号、授权或付费逻辑；禁用 Kindle 自更新覆盖 Kobo 宿主。
+- **原字节复用官方核心（双版本支持）**：同时支持官网最新 **`1.43.2+791`** 与 **`1.43.1+780`**，`libflutter_engine.so`、`libapp.so` 及原始资源保持原字节不变；不修改账号、授权或付费逻辑；禁用 Kindle 自更新覆盖 Kobo 宿主。
 - **墨水屏刷新策略（对齐 KOReader MTK）**：
   - **白底灰阶**：局部 `GLR16 (4)` / 清屏 `GC16 (2)`
   - **纯灰阶黑底（夜间模式）**：局部 `GLKW16 (9)` / 清屏 `GCK16 (8)`，配合 KOReader MTK `night_mode 4` 硬件反相与互补灰阶提交，消除黑底全刷白闪
   - **真实彩色与旧色擦除**：局部 `GLRC16 (11)` / 清屏 `GCC16 (10)` + `CFA G2 (0x600)`，抑制 2 级以内 RGB 舍入噪声误触发彩色模式
   - **帧同步与边界对齐**：16 像素对齐 + 边缘余量，RAM 帧缓存跳过重复帧，每次 FULL REAGL/CFA 请求等待刷新完成同步
-- **阅读界面冷暖光扩展 (0.5.0+)**：
-  - 在「书页中央 → 显示」前光行下方合成硬件「冷暖」控制行（0 最冷 ～ 100 最暖，10% 步进，对应底层 `lm3630a_led/color` 0–10 反向混光），松手持久化至 `userdata/kobo-light.conf`
-- **电源键锁屏、深度休眠与隔夜唤醒保护 (0.7.0)**：
-  - 支持「自定义锁屏画面」，短按电源键锁屏并进入 Linux `mem` 深度休眠（充电时按 MTK 限制仅锁屏关灯、跳过内核深睡），再按直接唤醒回到当前书页
+- **前光与冷暖光控制（自适应 `1.43.2+` 原生滑块与 `1.43.1` 叠画滑块）**：
+  - **`1.43.2+791`**：直接对接 Reeden 官方 UI 原生新增的「暖光」滑块（`currentAmberLevel` `0..24` 映射至底层 `lm3630a_led/color` `10..0` 反向混光），自动持久化至 `userdata/kobo-light.conf`
+  - **`1.43.1+780`**：在「书页中央 → 显示」前光行下方合成硬件「冷暖」控制行（0 最冷 ～ 100 最暖，10% 步进）
+- **电源键锁屏（含 `1.43.2+` 彩色与透明叠底锁屏）、深度休眠与隔夜唤醒保护 (0.7.0)**：
+  - 支持「自定义锁屏画面」（在 `1.43.2+791` 下支持 3/4 通道 **RGB 彩色锁屏封面**与**透明区域叠在当前书页上**），短按电源键锁屏并进入 Linux `mem` 深度休眠（充电时按 MTK 限制仅锁屏关灯、跳过内核深睡），再按直接唤醒回到当前书页
   - 使用独立非 `SIGCHLD` (`__WCLONE`) 监督进程等待休眠脚本，避免与 Dart 3.12.2 全局 `wait()` 回收线程竞争导致唤醒卡死
   - 记录 `preparing / suspended / resuming / complete` 阶段时间戳；准备或唤醒恢复超过 45 秒由 `guardian.sh` 自动恢复 Kobo 原生界面
 - **安全交接与退出恢复**：

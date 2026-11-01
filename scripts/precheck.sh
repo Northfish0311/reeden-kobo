@@ -31,7 +31,8 @@ fi
 # 3. Official Core & Loader
 if [ -f "$APP/core/lib/libflutter_engine.so" ] && [ -f "$APP/core/lib/libapp.so" ] && [ -f "$APP/ui-assets/assets/fonts/KoboCJKMath-Regular.ttf" ]; then
     if "$APP/runtime/reeden-kindle" --verify "$APP/bin/reeden-kindle" >/dev/null 2>&1; then
-        echo "[OK] Core 1.43.1+780 & ARMHF Loader verified"
+        core_ver=$(sed -n 's/.*"official_version":[[:space:]]*"\([^"]*\)".*/\1/p' "$APP/build-info.json" 2>/dev/null | head -n 1)
+        echo "[OK] Core ${core_ver:-verified} & ARMHF Loader verified"
     else
         echo "[FAIL] Private glibc loader verify failed"
     fi

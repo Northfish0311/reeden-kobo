@@ -88,7 +88,19 @@ int main(void){
     d.dirty=true;flush_now(&d);assert(last_wave==REFRESH_GLKW16&&last_flags==0&&inverted);
     snprintf(path,sizeof(path),"%s/cover.y8",root);FILE *cover=fopen(path,"wb");assert(cover);
     uint8_t white[4096];memset(white,255,sizeof(white));assert(fwrite(white,1,sizeof(white),cover)==sizeof(white));fclose(cover);
-    assert(!display_cover(&d,path,64,64));assert(!inverted&&last_wave==REFRESH_GC16);
+    assert(!display_cover(&d,path,64,64,1));assert(!inverted&&last_wave==REFRESH_GC16);
+    unlink(path);
+    /* 1.43.2+ RGB (3-channel) and RGBA (4-channel transparent over committed page) sleep covers. */
+    snprintf(path,sizeof(path),"%s/cover.rgb",root);cover=fopen(path,"wb");assert(cover);
+    uint8_t rgb_cover[64*64*3];memset(rgb_cover,255,sizeof(rgb_cover));
+    rgb_cover[0]=220;rgb_cover[1]=40;rgb_cover[2]=30;
+    assert(fwrite(rgb_cover,1,sizeof(rgb_cover),cover)==sizeof(rgb_cover));fclose(cover);
+    assert(!display_cover(&d,path,64,64,3));assert(!inverted&&last_wave==REFRESH_GCC16&&last_flags==REFRESH_CFA_G2);
+    unlink(path);
+    snprintf(path,sizeof(path),"%s/cover.rgba",root);cover=fopen(path,"wb");assert(cover);
+    uint8_t rgba_cover[64*64*4];memset(rgba_cover,0,sizeof(rgba_cover)); /* fully transparent -> keeps committed */
+    assert(fwrite(rgba_cover,1,sizeof(rgba_cover),cover)==sizeof(rgba_cover));fclose(cover);
+    assert(!display_cover(&d,path,64,64,4));assert(d.committed[0]==30&&d.committed[1]==40&&d.committed[2]==220);
     unlink(path);snprintf(path,sizeof(path),"%s/state/night-invert",root);assert(access(path,F_OK)<0);
     /* A failed global write must retain its recovery obligation and abort. */
     fail_inversion=true;display_full(&d);flush_now(&d);assert(app_quit&&access(path,F_OK)==0);

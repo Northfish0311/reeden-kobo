@@ -28,12 +28,18 @@ import urllib.request
 import zipfile
 
 ROOT = pathlib.Path(__file__).resolve().parent
-EXPECTED_CORE = {
-    'libflutter_engine.so': '8eca49cb5a50573f61668706a99807e3987902b37c311d982872d31fd09e4f37',
-    'libapp.so': '6662907460efb82361eb7c3bdffcb83735bda381f6d98445d61e00e10bc6930e',
+SUPPORTED_CORES = {
+    '1.43.2+791': {
+        'libflutter_engine.so': '854a11f2f649eeab245279f2b5b2c6db2df4f68ba2b28aa3e111ce834058bb9e',
+        'libapp.so': 'daf57297da3db5293ced3f12c708d80c1fce18141da15e3b504070dd702b599a',
+    },
+    '1.43.1+780': {
+        'libflutter_engine.so': '8eca49cb5a50573f61668706a99807e3987902b37c311d982872d31fd09e4f37',
+        'libapp.so': '6662907460efb82361eb7c3bdffcb83735bda381f6d98445d61e00e10bc6930e',
+    },
 }
+OFFICIAL_LATEST_URL = 'https://download.reeden.app/Reeden/latest/Reeden-kindle.zip'
 PORT_VERSION = '0.7.0-experimental'
-OFFICIAL_VERSION = '1.43.1+780'
 SUPPORTED_PRODUCT = '393'
 
 
@@ -120,6 +126,7 @@ def auto_discover_official_input(root: pathlib.Path) -> pathlib.Path | None:
     search_paths = [
         root / 'Reeden-kindle.zip',
         cwd / 'Reeden-kindle.zip',
+        root / 'cache' / 'Reeden-kindle.zip',
         root / 'reeden' / 'reeden',
         cwd / 'reeden' / 'reeden',
         home / 'Downloads' / 'Reeden-kindle.zip',
@@ -152,7 +159,7 @@ def clean_dragged_path(raw: str) -> pathlib.Path:
     return pathlib.Path(s).expanduser()
 
 
-def resolve_official_core(user_arg: str | None, temp_root: pathlib.Path) -> pathlib.Path:
+def resolve_official_core(user_arg: str | None, temp_root: pathlib.Path, auto_download: bool = False) -> tuple[pathlib.Path, str]:
     target: pathlib.Path | None = None
     if user_arg:
         target = pathlib.Path(user_arg).expanduser().resolve()
@@ -160,16 +167,32 @@ def resolve_official_core(user_arg: str | None, temp_root: pathlib.Path) -> path
         target = auto_discover_official_input(ROOT)
         if target is not None:
             print(f'[1/4] 自动发现官方包: {target}')
+        elif auto_download:
+            cache_zip = ROOT / 'cache' / 'Reeden-kindle.zip'
+            cache_zip.parent.mkdir(parents=True, exist_ok=True)
+            print(f'[1/4] 正在从 Reeden 官网下载最新安装包 ({OFFICIAL_LATEST_URL}) ...')
+            req = urllib.request.Request(OFFICIAL_LATEST_URL, headers={'User-Agent': 'reeden-kobo-installer/0.7.0'})
+            with open_url_with_cert_fallback(req, timeout=180) as resp, cache_zip.open('wb') as out:
+                shutil.copyfileobj(resp, out)
+            target = cache_zip
         elif sys.stdin.isatty():
             print('\n未在当前目录或「下载」目录自动找到 Reeden-kindle.zip。')
-            print('请先从 Reeden 官网下载 Kindle 版 (1.43.1+780)：https://reeden.app/cn/download/kindle')
-            entered = input('请将 Reeden-kindle.zip（或解压后的 reeden 目录）拖入此窗口并按回车: ').strip()
+            print('支持官方版本：1.43.2+791（当前官网最新版）或 1.43.1+780')
+            entered = input('请将 Reeden-kindle.zip 拖入此窗口并按回车（直接按回车则自动从官网下载最新包）: ').strip()
             if entered:
                 target = clean_dragged_path(entered).resolve()
+            else:
+                cache_zip = ROOT / 'cache' / 'Reeden-kindle.zip'
+                cache_zip.parent.mkdir(parents=True, exist_ok=True)
+                print(f'[1/4] 正在从 Reeden 官网下载最新安装包 ({OFFICIAL_LATEST_URL}) ...')
+                req = urllib.request.Request(OFFICIAL_LATEST_URL, headers={'User-Agent': 'reeden-kobo-installer/0.7.0'})
+                with open_url_with_cert_fallback(req, timeout=180) as resp, cache_zip.open('wb') as out:
+                    shutil.copyfileobj(resp, out)
+                target = cache_zip
     if target is None or not target.exists():
         raise FileNotFoundError(
-            '未找到官方 Reeden Kindle 1.43.1+780 安装包。请将 Reeden-kindle.zip 放在同目录或系统「下载」文件夹，'
-            '或通过 --official-core 指定路径。'
+            '未找到官方 Reeden Kindle 安装包 (支持 1.43.2+791 或 1.43.1+780)。请将 Reeden-kindle.zip 放在同目录或系统「下载」文件夹，'
+            '或通过 --official-core 指定路径（也可加 --download-official 自动从官网下载）。'
         )
     if target.is_file() and zipfile.is_zipfile(target):
         extract_dir = temp_root / 'official-extracted'
@@ -182,20 +205,29 @@ def resolve_official_core(user_arg: str | None, temp_root: pathlib.Path) -> path
     if core_dir is None:
         raise ValueError(f'在 {target} 中未找到包含 data/ 与 lib/ 的官方 reeden/reeden 目录')
 
-    for name, expected_hash in EXPECTED_CORE.items():
+    actual_hashes = {}
+    for name in ('libflutter_engine.so', 'libapp.so'):
         lib_path = core_dir / 'lib' / name
         if not lib_path.is_file():
             raise FileNotFoundError(f'缺少官方核心文件: {lib_path}')
-        actual = sha256_file(lib_path)
-        if actual != expected_hash:
-            raise ValueError(
-                f'官方核心版本不匹配 ({name}): 实测 {actual[:12]}...，需要官方 1.43.1+780 ({expected_hash[:12]}...)'
-            )
+        actual_hashes[name] = sha256_file(lib_path)
+
+    matched_version = next(
+        (ver for ver, expected in SUPPORTED_CORES.items() if actual_hashes == expected),
+        None,
+    )
+    if matched_version is None:
+        supported_str = ' / '.join(SUPPORTED_CORES.keys())
+        raise ValueError(
+            f'官方核心版本不在已验证白名单内 (当前支持: {supported_str})。\n'
+            f'实测 libflutter_engine.so={actual_hashes["libflutter_engine.so"][:12]}..., '
+            f'libapp.so={actual_hashes["libapp.so"][:12]}...'
+        )
     for rel in ('data/flutter_assets', 'lib/glibc', 'licenses'):
         if not (core_dir / rel).is_dir():
             raise FileNotFoundError(f'缺少官方子目录: {core_dir / rel}')
-    print('[1/4] 官方 Reeden 1.43.1+780 核心 SHA-256 校验通过（原字节未修改）')
-    return core_dir
+    print(f'[1/4] 官方 Reeden {matched_version} 核心 SHA-256 校验通过（原字节未修改）')
+    return core_dir, matched_version
 
 
 def open_url_with_cert_fallback(req: urllib.request.Request, timeout: int = 60):
@@ -283,7 +315,13 @@ def extract_deb_pure(deb_path: pathlib.Path, dest_dir: pathlib.Path) -> None:
         symlinks = remaining
 
 
-def assemble_package(core_dir: pathlib.Path, prebuilt_dir: pathlib.Path, dest: pathlib.Path, temp_root: pathlib.Path) -> int:
+def assemble_package(
+    core_dir: pathlib.Path,
+    official_version: str,
+    prebuilt_dir: pathlib.Path,
+    dest: pathlib.Path,
+    temp_root: pathlib.Path,
+) -> int:
     cache_dir = ROOT / 'cache'
     alt_dirs = [ROOT.parent / 'deps']
     deb_manifest = json.loads((ROOT / 'vendor/debian-runtime-manifest.json').read_text(encoding='utf-8'))
@@ -300,7 +338,8 @@ def assemble_package(core_dir: pathlib.Path, prebuilt_dir: pathlib.Path, dest: p
     print('[3/4] 正在组装完整运行包 (无符号链接，适配 FAT32 分区) ...')
     for d in [
         'bin', 'lib', 'runtime', 'fonts', 'certs', 'checks', 'licenses',
-        'docs', 'state', 'logs', 'userdata', 'storage/books', 'storage/documents', 'cache',
+        'docs', 'state', 'logs', 'userdata', 'storage/books', 'storage/documents',
+        'storage/screenshots', 'cache',
     ]:
         (dest / d).mkdir(parents=True, exist_ok=True)
 
@@ -380,7 +419,7 @@ def assemble_package(core_dir: pathlib.Path, prebuilt_dir: pathlib.Path, dest: p
     )
     info = {
         'port_version': PORT_VERSION,
-        'official_version': OFFICIAL_VERSION,
+        'official_version': official_version,
         'model': 'Kobo Clara Colour (393)',
         'firmware': '4.46.23836',
         'first_launch': 'USER_AUTHORIZED_SSH',
@@ -579,7 +618,12 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         '--official-core',
-        help='官方 Reeden 1.43.1+780 安装包路径 (支持直接传 Reeden-kindle.zip 或解压后的 reeden/reeden 目录；省略时自动搜索)',
+        help='官方 Reeden 安装包路径 (支持 1.43.2+791 或 1.43.1+780；支持直接传 Reeden-kindle.zip 或解压后的 reeden/reeden 目录；省略时自动搜索)',
+    )
+    parser.add_argument(
+        '--download-official',
+        action='store_true',
+        help='若本地未找到官方包，自动从 Reeden 官网下载最新 Reeden-kindle.zip 并校验',
     )
     parser.add_argument(
         '--output',
@@ -609,7 +653,11 @@ def main() -> int:
     prebuilt_dir = verify_prebuilt(ROOT)
     with tempfile.TemporaryDirectory(prefix='reeden-kobo-oneclick-') as tmp:
         temp_root = pathlib.Path(tmp)
-        core_dir = resolve_official_core(args.official_core, temp_root)
+        core_dir, official_version = resolve_official_core(
+            args.official_core,
+            temp_root,
+            auto_download=args.download_official,
+        )
 
         # Determine output directory if requested
         if args.output:
@@ -620,7 +668,7 @@ def main() -> int:
         else:
             pkg_dir = temp_root / 'package'
 
-        file_count = assemble_package(core_dir, prebuilt_dir, pkg_dir, temp_root)
+        file_count = assemble_package(core_dir, official_version, prebuilt_dir, pkg_dir, temp_root)
         print(f'      已组出 {file_count} 个已校验文件（加上 SHA256SUMS 共 {file_count + 1} 个文件）。')
 
         # Explicit CLI mode selection

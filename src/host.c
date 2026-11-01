@@ -35,7 +35,7 @@ static const char *root;
 static bool sleeping;
 static uint64_t cover_at;
 static char cover_path[4096];
-static unsigned cover_width,cover_height;
+static unsigned cover_width,cover_height,cover_channels=1;
 static int saved_brightness=-1;
 static pid_t power_worker=-1;
 static char heartbeat_path[4096];
@@ -72,11 +72,12 @@ static void sleep_cover_channel(const FlutterPlatformMessage *m,const char *meth
     Writer w={0};w_byte(&w,0);
     if(!strcmp(method,"platform"))w_string(&w,"kindle");
     else if(!strcmp(method,"currentImage"))w_null(&w);
-    else if(!strcmp(method,"isSupported"))w_bool(&w,1);
+    else if(!strcmp(method,"isSupported")||!strcmp(method,"rgb"))w_bool(&w,1);
     else if(!strcmp(method,"setImage")){
-        Value path={0},width={0},height={0};
+        Value path={0},width={0},height={0},ch={0};
         bool valid=read_argument(args,"path",&path)&&path.type==7&&read_argument(args,"width",&width)&&read_argument(args,"height",&height)&&width.integer>0&&height.integer>0&&width.integer<=4096&&height.integer<=4096;
-        if(valid){snprintf(cover_path,sizeof(cover_path),"%s",path.string);cover_width=width.integer;cover_height=height.integer;if(sleeping)cover_at=monotonic_ns()+100000000ULL;fprintf(stderr,"[sleep-cover] registered %ux%u\n",cover_width,cover_height);}
+        unsigned channels=(read_argument(args,"channels",&ch)&&ch.integer>=1&&ch.integer<=4)?(unsigned)ch.integer:1;
+        if(valid){snprintf(cover_path,sizeof(cover_path),"%s",path.string);cover_width=width.integer;cover_height=height.integer;cover_channels=channels;if(sleeping)cover_at=monotonic_ns()+100000000ULL;fprintf(stderr,"[sleep-cover] registered %ux%u channels=%u\n",cover_width,cover_height,cover_channels);}
         w_bool(&w,valid);
     }else {empty_reply(m);return;}
     respond(m,w.data,w.n);
@@ -208,6 +209,13 @@ static void platform_message(const FlutterPlatformMessage *m,void *u){
     if(!strcmp(m->channel,"app.reeden.eink_epd")){eink_channel(m,method,r);return;}
     if(!strcmp(m->channel,"app.reeden.kobo")){kobo_channel(m,method,r);return;}
     if(!strcmp(m->channel,"app.reeden.eink_sleep_cover")){sleep_cover_channel(m,method,r);return;}
+    if(!strcmp(m->channel,"app.reeden.kindle_screen")){
+        Writer w={0};w_byte(&w,0);
+        if(!strcmp(method,"state")){w_map(&w,2);w_string(&w,"supported");w_bool(&w,0);w_string(&w,"landscape");w_bool(&w,0);}
+        else if(!strcmp(method,"setLandscape"))w_bool(&w,0);
+        else {empty_reply(m);return;}
+        respond(m,w.data,w.n);return;
+    }
     if(!strcmp(m->channel,"app.reeden.ireader_epdc")){
         Writer w={0};w_byte(&w,0);if(!strcmp(method,"isSupported"))w_bool(&w,0);else {empty_reply(m);return;}respond(m,w.data,w.n);return;
     }
@@ -278,9 +286,18 @@ int main(int argc,char **argv){
     light_panel_init(root,(LightPanelOps){.read_number=read_number,.write_number=write_number,.invalidate=light_panel_changed,.userdata=&screen});
     touch_set_filter(light_panel_pointer);
 #endif
-    char assets[4096],icu[4096],aot_path[4096],cache[4096];
+    char assets[4096],icu[4096],aot_path[4096],cache[4096],ver_path[4096];
     char core[4096];snprintf(core,sizeof(core),"%s/core",root);const char *bundle=getenv("REEDEN_BUNDLE_DIR");if(!bundle)bundle=core;
     snprintf(assets,sizeof(assets),"%s/data/flutter_assets",bundle);snprintf(icu,sizeof(icu),"%s/data/icudtl.dat",bundle);snprintf(aot_path,sizeof(aot_path),"%s/lib/libapp.so",bundle);snprintf(cache,sizeof(cache),"%s/cache",root);
+#ifndef REEDEN_HEADLESS_DIAGNOSTIC
+    snprintf(ver_path,sizeof(ver_path),"%s/version.json",assets);
+    bool core_is_1431=false;
+    {FILE *vf=fopen(ver_path,"r");if(vf){char vbuf[256]={0};size_t vn=fread(vbuf,1,sizeof(vbuf)-1,vf);fclose(vf);if(vn>0&&strstr(vbuf,"\"1.43.1\""))core_is_1431=true;}}
+    screen.use_light_overlay=core_is_1431;
+    if(!core_is_1431)touch_set_filter(NULL);
+#else
+    (void)ver_path;
+#endif
     const char *asset_override=getenv("REEDEN_ASSETS_DIR");
     if(asset_override)snprintf(assets,sizeof(assets),"%s",asset_override);
     FlutterEngineAOTData aot=NULL;FlutterEngineAOTDataSource source={.type=kFlutterEngineAOTDataSourceTypeElfPath,.elf_path=aot_path};
@@ -348,7 +365,7 @@ int main(int argc,char **argv){
         if(acquired&&!sleeping)display_flush(&screen);
         if(acquired&&sleeping&&cover_at&&monotonic_ns()>=cover_at){
             cover_at=0;
-            if(*cover_path){if(display_cover(&screen,cover_path,cover_width,cover_height))perror("sleep cover");else fprintf(stderr,"[sleep-cover] displayed Reeden grayscale image\n");}
+            if(*cover_path){if(display_cover(&screen,cover_path,cover_width,cover_height,cover_channels))perror("sleep cover");else fprintf(stderr,"[sleep-cover] displayed Reeden image channels=%u\n",cover_channels);}
             else fprintf(stderr,"[sleep-cover] not registered; keeping current page\n");
             display_wait(&screen);
             write_number("/sys/class/backlight/mxc_msp430.0/brightness",0);

@@ -8,12 +8,17 @@ build_font_fallback.py outputs under build/ and deps/ next to the repository.
 import hashlib,json,os,pathlib,shutil
 ROOT=pathlib.Path(__file__).resolve().parents[1]
 CORE=pathlib.Path(os.environ['REEDEN_OFFICIAL_CORE'])
-expected={'libflutter_engine.so':'8eca49cb5a50573f61668706a99807e3987902b37c311d982872d31fd09e4f37','libapp.so':'6662907460efb82361eb7c3bdffcb83735bda381f6d98445d61e00e10bc6930e'}
-for name,digest in expected.items():assert hashlib.sha256((CORE/'lib'/name).read_bytes()).hexdigest()==digest,'Wrong official core version: '+name
+SUPPORTED_CORES={
+    '1.43.2+791': {'libflutter_engine.so':'854a11f2f649eeab245279f2b5b2c6db2df4f68ba2b28aa3e111ce834058bb9e','libapp.so':'daf57297da3db5293ced3f12c708d80c1fce18141da15e3b504070dd702b599a'},
+    '1.43.1+780': {'libflutter_engine.so':'8eca49cb5a50573f61668706a99807e3987902b37c311d982872d31fd09e4f37','libapp.so':'6662907460efb82361eb7c3bdffcb83735bda381f6d98445d61e00e10bc6930e'},
+}
+actual_hashes={name:hashlib.sha256((CORE/'lib'/name).read_bytes()).hexdigest() for name in ('libflutter_engine.so','libapp.so')}
+matched_version=next((ver for ver,expected in SUPPORTED_CORES.items() if actual_hashes==expected),None)
+assert matched_version,'Wrong official core version (requires 1.43.2+791 or 1.43.1+780)'
 P=ROOT/'package'
 def copy(src,dst):
     dst.parent.mkdir(parents=True,exist_ok=True);shutil.copy2(src.resolve(),dst)
-for d in ['runtime','fonts','certs','checks','licenses','docs','state','logs','userdata','storage/books','storage/documents','cache']:(P/d).mkdir(parents=True,exist_ok=True)
+for d in ['runtime','fonts','certs','checks','licenses','docs','state','logs','userdata','storage/books','storage/documents','storage/screenshots','cache']:(P/d).mkdir(parents=True,exist_ok=True)
 for src in (CORE/'lib').glob('*.so*'):copy(src,P/'core/lib'/src.name)
 shutil.copytree(CORE/'data',P/'core/data',dirs_exist_ok=True)
 # Keep the complete official core byte-for-byte. Only the separate UI asset
@@ -54,7 +59,7 @@ for src in (ROOT/'docs').glob('*'):copy(src,P/'docs'/src.name)
 for src in (P/'runtime').iterdir():src.chmod(0o755)
 for src in (P/'bin').iterdir():src.chmod(0o755)
 (P/'nickelmenu.conf').write_text('menu_item:main:Reeden Kobo (test):cmd_spawn:quiet:exec /mnt/onboard/.adds/reeden-kobo/run.sh\nmenu_item:main:Reeden Kobo - Check:cmd_output:8000:/mnt/onboard/.adds/reeden-kobo/precheck.sh\nmenu_item:main:Reeden Kobo - Return Home:cmd_spawn:quiet:exec /mnt/onboard/.adds/reeden-kobo/recover.sh\nmenu_item:main:Reeden SSH:cmd_spawn:quiet:exec /mnt/onboard/.adds/reeden-kobo/reeden-ssh.sh\n')
-info={'port_version':'0.7.0-experimental','official_version':'1.43.1+780','model':'Kobo Clara Colour (393)','firmware':'4.46.23836','first_launch':'USER_AUTHORIZED_SSH','official_core_unmodified':True,'ui_assets_overlay':True,'font_sha256':hashlib.sha256((P/'fonts/NotoSansCJKsc-Regular.otf').read_bytes()).hexdigest()}
+info={'port_version':'0.7.0-experimental','official_version':matched_version,'model':'Kobo Clara Colour (393)','firmware':'4.46.23836','first_launch':'USER_AUTHORIZED_SSH','official_core_unmodified':True,'ui_assets_overlay':True,'font_sha256':hashlib.sha256((P/'fonts/NotoSansCJKsc-Regular.otf').read_bytes()).hexdigest()}
 (P/'build-info.json').write_text(json.dumps(info,indent=2)+'\n')
 # Empty mutable directories are excluded; checksums cover every shipped file.
 files=sorted(x for x in P.rglob('*') if x.is_file() and x.name!='SHA256SUMS')
