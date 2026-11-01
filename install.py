@@ -349,7 +349,8 @@ def assemble_package(core_dir: pathlib.Path, prebuilt_dir: pathlib.Path, dest: p
             copy_regular(src, dest / 'checks' / src.name)
     for name in [
         'run.sh', 'session.sh', 'recover.sh', 'guardian.sh',
-        'native-session.sh', 'power.sh', 'reeden-ssh.sh', 'uninstall.sh', 'install.sh', 'verify.sh',
+        'native-session.sh', 'power.sh', 'precheck.sh', 'reeden-ssh.sh',
+        'uninstall.sh', 'install.sh', 'verify.sh',
     ]:
         copy_lf_script(ROOT / 'scripts' / name, dest / name, 0o755)
     for name in ['lipc-get-prop', 'lipc-set-prop']:
@@ -371,6 +372,7 @@ def assemble_package(core_dir: pathlib.Path, prebuilt_dir: pathlib.Path, dest: p
 
     (dest / 'nickelmenu.conf').write_text(
         'menu_item:main:Reeden Kobo (test):cmd_spawn:quiet:exec /mnt/onboard/.adds/reeden-kobo/run.sh\n'
+        'menu_item:main:Reeden Kobo - Check:cmd_output:8000:/mnt/onboard/.adds/reeden-kobo/precheck.sh\n'
         'menu_item:main:Reeden Kobo - Return Home:cmd_spawn:quiet:exec /mnt/onboard/.adds/reeden-kobo/recover.sh\n'
         'menu_item:main:Reeden SSH:cmd_spawn:quiet:exec /mnt/onboard/.adds/reeden-kobo/reeden-ssh.sh\n',
         encoding='utf-8',

@@ -40,7 +40,7 @@ for src in (base/'usr/share/doc').glob('*/copyright'):copy(src,P/'licenses/debia
 certificates=sorted((base/'usr/share/ca-certificates/mozilla').glob('*.crt'))
 assert len(certificates)>100,'CA package missing'
 (P/'certs/ca-certificates.crt').write_bytes(b'\n'.join(x.read_bytes() for x in certificates))
-for name in ['run.sh','session.sh','recover.sh','guardian.sh','native-session.sh','power.sh','reeden-ssh.sh','uninstall.sh','install.sh','verify.sh']:
+for name in ['run.sh','session.sh','recover.sh','guardian.sh','native-session.sh','power.sh','precheck.sh','reeden-ssh.sh','uninstall.sh','install.sh','verify.sh']:
     copy(ROOT/'scripts'/name,P/name);(P/name).chmod(0o755)
 for name in ['lipc-get-prop','lipc-set-prop']:
     copy(ROOT/'scripts'/name,P/'bin'/name);(P/'bin'/name).chmod(0o755)
@@ -53,7 +53,7 @@ copy(ROOT/'vendor/debian-runtime-manifest.json',P/'licenses/debian-runtime-manif
 for src in (ROOT/'docs').glob('*'):copy(src,P/'docs'/src.name)
 for src in (P/'runtime').iterdir():src.chmod(0o755)
 for src in (P/'bin').iterdir():src.chmod(0o755)
-(P/'nickelmenu.conf').write_text('menu_item:main:Reeden Kobo (test):cmd_spawn:quiet:exec /mnt/onboard/.adds/reeden-kobo/run.sh\nmenu_item:main:Reeden Kobo - Return Home:cmd_spawn:quiet:exec /mnt/onboard/.adds/reeden-kobo/recover.sh\nmenu_item:main:Reeden SSH:cmd_spawn:quiet:exec /mnt/onboard/.adds/reeden-kobo/reeden-ssh.sh\n')
+(P/'nickelmenu.conf').write_text('menu_item:main:Reeden Kobo (test):cmd_spawn:quiet:exec /mnt/onboard/.adds/reeden-kobo/run.sh\nmenu_item:main:Reeden Kobo - Check:cmd_output:8000:/mnt/onboard/.adds/reeden-kobo/precheck.sh\nmenu_item:main:Reeden Kobo - Return Home:cmd_spawn:quiet:exec /mnt/onboard/.adds/reeden-kobo/recover.sh\nmenu_item:main:Reeden SSH:cmd_spawn:quiet:exec /mnt/onboard/.adds/reeden-kobo/reeden-ssh.sh\n')
 info={'port_version':'0.7.0-experimental','official_version':'1.43.1+780','model':'Kobo Clara Colour (393)','firmware':'4.46.23836','first_launch':'USER_AUTHORIZED_SSH','official_core_unmodified':True,'ui_assets_overlay':True,'font_sha256':hashlib.sha256((P/'fonts/NotoSansCJKsc-Regular.otf').read_bytes()).hexdigest()}
 (P/'build-info.json').write_text(json.dumps(info,indent=2)+'\n')
 # Empty mutable directories are excluded; checksums cover every shipped file.
