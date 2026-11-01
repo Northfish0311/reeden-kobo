@@ -68,17 +68,20 @@ with tempfile.TemporaryDirectory(prefix='reeden-install-sh-test-') as tmp:
     assert r.returncode == 1 and 'currently active' in r.stdout + r.stderr
     (dest / 'state' / 'active').rmdir()
 
-    # 4. Upgrade preserves userdata/storage and leaves a backup
+    # 4. Upgrade preserves userdata/storage/diagnostics/ssh and leaves a backup
     (dest / 'userdata').mkdir()
     (dest / 'userdata' / 'kobo-light.conf').write_text('warmth=40\n', encoding='utf-8')
     (dest / 'storage' / 'books').mkdir(parents=True)
     (dest / 'storage' / 'books' / 'novel.epub').write_text('book-bytes\n', encoding='utf-8')
+    (dest / 'diagnostics' / 'ssh').mkdir(parents=True)
+    (dest / 'diagnostics' / 'ssh' / 'reeden-ssh').write_text('dropbear-bin\n', encoding='utf-8')
     stage3 = build_stage(base, '20260101-000004', 'v3')
     r = run(stage3, '--upgrade')
     assert r.returncode == 0, (r.returncode, r.stdout, r.stderr)
     assert (dest / 'payload-v3.txt').is_file()
     assert (dest / 'userdata' / 'kobo-light.conf').read_text(encoding='utf-8') == 'warmth=40\n'
     assert (dest / 'storage' / 'books' / 'novel.epub').read_text(encoding='utf-8') == 'book-bytes\n'
+    assert (dest / 'diagnostics' / 'ssh' / 'reeden-ssh').read_text(encoding='utf-8') == 'dropbear-bin\n'
     backups = sorted((onboard / '.adds').glob('reeden-kobo-backup-*'))
     assert len(backups) == 1 and (backups[0] / 'payload-v1.txt').is_file()
     assert entry.is_file(), 'menu entry must survive upgrade'

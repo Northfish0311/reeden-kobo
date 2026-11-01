@@ -18,10 +18,12 @@ import os
 import pathlib
 import platform
 import shutil
+import ssl
 import subprocess
 import sys
 import tarfile
 import tempfile
+import urllib.error
 import urllib.request
 import zipfile
 
@@ -46,6 +48,33 @@ def sha256_file(path: pathlib.Path) -> str:
 def copy_regular(src: pathlib.Path, dst: pathlib.Path) -> None:
     dst.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(src.resolve(), dst)
+
+
+def copy_lf_script(src: pathlib.Path, dst: pathlib.Path, mode: int = 0o755) -> None:
+    """Copy a shell script while normalizing CRLF -> LF (Windows autocrlf safety)."""
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    raw = src.resolve().read_bytes().replace(b'\r\n', b'\n')
+    dst.write_bytes(raw)
+    dst.chmod(mode)
+
+
+def cleanup_appledouble(root_dir: pathlib.Path) -> None:
+    """Remove macOS AppleDouble (._*) metadata files created on FAT32 volumes."""
+    if not root_dir.exists():
+        return
+    if root_dir.is_file():
+        if root_dir.name.startswith('._'):
+            root_dir.unlink(missing_ok=True)
+        return
+    for p in list(root_dir.rglob('._*')):
+        if p.is_file():
+            p.unlink(missing_ok=True)
+
+
+def copytree_fat32_safe(src: pathlib.Path, dst: pathlib.Path) -> None:
+    """Copy directory contents using copyfile (omitting macOS xattrs on FAT32)."""
+    shutil.copytree(src, dst, copy_function=shutil.copyfile, dirs_exist_ok=True)
+    cleanup_appledouble(dst)
 
 
 def verify_prebuilt(root: pathlib.Path) -> pathlib.Path:
@@ -81,6 +110,11 @@ def find_core_dir_in(base: pathlib.Path) -> pathlib.Path | None:
 
 
 def auto_discover_official_input(root: pathlib.Path) -> pathlib.Path | None:
+    env_core = os.environ.get('REEDEN_OFFICIAL_CORE', '').strip()
+    if env_core:
+        p = pathlib.Path(env_core).expanduser()
+        if p.exists():
+            return p
     home = pathlib.Path.home()
     cwd = pathlib.Path.cwd()
     search_paths = [
@@ -95,6 +129,17 @@ def auto_discover_official_input(root: pathlib.Path) -> pathlib.Path | None:
     for p in search_paths:
         if p.exists():
             return p
+    # Also match browser-renamed downloads such as "Reeden-kindle (1).zip"
+    for folder in (root, cwd, home / 'Downloads', home / 'Desktop'):
+        if not folder.is_dir():
+            continue
+        try:
+            for item in sorted(folder.iterdir()):
+                low = item.name.lower()
+                if item.is_file() and low.startswith('reeden') and 'kindle' in low and low.endswith('.zip'):
+                    return item
+        except OSError:
+            continue
     return None
 
 
@@ -123,7 +168,7 @@ def resolve_official_core(user_arg: str | None, temp_root: pathlib.Path) -> path
                 target = clean_dragged_path(entered).resolve()
     if target is None or not target.exists():
         raise FileNotFoundError(
-            '未找到官方 Reeden Kindle 1.43.1+780 安装包。请将 Reeden-kindle.zip 放在同目录，'
+            '未找到官方 Reeden Kindle 1.43.1+780 安装包。请将 Reeden-kindle.zip 放在同目录或系统「下载」文件夹，'
             '或通过 --official-core 指定路径。'
         )
     if target.is_file() and zipfile.is_zipfile(target):
@@ -153,6 +198,16 @@ def resolve_official_core(user_arg: str | None, temp_root: pathlib.Path) -> path
     return core_dir
 
 
+def open_url_with_cert_fallback(req: urllib.request.Request, timeout: int = 60):
+    try:
+        return urllib.request.urlopen(req, timeout=timeout)
+    except urllib.error.URLError as exc:
+        if isinstance(exc.reason, ssl.SSLCertVerificationError) and pathlib.Path('/etc/ssl/cert.pem').is_file():
+            ctx = ssl.create_default_context(cafile='/etc/ssl/cert.pem')
+            return urllib.request.urlopen(req, timeout=timeout, context=ctx)
+        raise
+
+
 def download_verified(url: str, sha256: str, cache_dir: pathlib.Path, alt_dirs: list[pathlib.Path]) -> pathlib.Path:
     filename = pathlib.Path(url).name
     for d in [cache_dir, *alt_dirs]:
@@ -163,7 +218,7 @@ def download_verified(url: str, sha256: str, cache_dir: pathlib.Path, alt_dirs: 
     dest = cache_dir / filename
     print(f'      下载依赖: {filename} ...')
     req = urllib.request.Request(url, headers={'User-Agent': 'reeden-kobo-installer/0.7.0'})
-    with urllib.request.urlopen(req, timeout=60) as resp, dest.open('wb') as out:
+    with open_url_with_cert_fallback(req, timeout=60) as resp, dest.open('wb') as out:
         shutil.copyfileobj(resp, out)
     if sha256_file(dest) != sha256:
         dest.unlink(missing_ok=True)
@@ -270,7 +325,7 @@ def assemble_package(core_dir: pathlib.Path, prebuilt_dir: pathlib.Path, dest: p
     for family in families:
         if family.get('family') == 'NotoSansMath':
             family['fonts'] = [{'asset': 'assets/fonts/KoboCJKMath-Regular.ttf'}]
-    font_manifest_path.write_text(json.dumps(families, separators=(',', ':')) + '\n', encoding='utf-8')
+    font_manifest_path.write_text(json.dumps(families, separators=(',', ':')) + '\n', encoding='utf-8', newline='\n')
 
     # 3. Debian ARMHF runtime & CA certificates
     for tree in [deps_root / 'lib/arm-linux-gnueabihf', deps_root / 'usr/lib/arm-linux-gnueabihf']:
@@ -285,7 +340,7 @@ def assemble_package(core_dir: pathlib.Path, prebuilt_dir: pathlib.Path, dest: p
         raise RuntimeError('缺少 Mozilla 公共根证书集合')
     (dest / 'certs/ca-certificates.crt').write_bytes(b'\n'.join(x.read_bytes() for x in certificates))
 
-    # 4. Prebuilt Kobo adapter binaries & scripts
+    # 4. Prebuilt Kobo adapter binaries & LF-normalized shell scripts
     copy_regular(prebuilt_dir / 'bin/fb-guard', dest / 'bin/fb-guard')
     copy_regular(prebuilt_dir / 'bin/reeden-kindle', dest / 'bin/reeden-kindle')
     copy_regular(prebuilt_dir / 'lib/libreeden_kobo_compat.so', dest / 'lib/libreeden_kobo_compat.so')
@@ -294,12 +349,11 @@ def assemble_package(core_dir: pathlib.Path, prebuilt_dir: pathlib.Path, dest: p
             copy_regular(src, dest / 'checks' / src.name)
     for name in [
         'run.sh', 'session.sh', 'recover.sh', 'guardian.sh',
-        'native-session.sh', 'power.sh', 'uninstall.sh', 'install.sh', 'verify.sh',
+        'native-session.sh', 'power.sh', 'reeden-ssh.sh', 'uninstall.sh', 'install.sh', 'verify.sh',
     ]:
-        copy_regular(ROOT / 'scripts' / name, dest / name)
-        (dest / name).chmod(0o755)
+        copy_lf_script(ROOT / 'scripts' / name, dest / name, 0o755)
     for name in ['lipc-get-prop', 'lipc-set-prop']:
-        copy_regular(ROOT / 'scripts' / name, dest / 'bin' / name)
+        copy_lf_script(ROOT / 'scripts' / name, dest / 'bin' / name, 0o755)
 
     # 5. Fonts, licenses, docs, NickelMenu config, build-info, SHA256SUMS
     copy_regular(ROOT / 'LICENSE', dest / 'licenses/adapter-MIT-LICENSE')
@@ -317,8 +371,10 @@ def assemble_package(core_dir: pathlib.Path, prebuilt_dir: pathlib.Path, dest: p
 
     (dest / 'nickelmenu.conf').write_text(
         'menu_item:main:Reeden Kobo (test):cmd_spawn:quiet:exec /mnt/onboard/.adds/reeden-kobo/run.sh\n'
-        'menu_item:main:Reeden Kobo - Return Home:cmd_spawn:quiet:exec /mnt/onboard/.adds/reeden-kobo/recover.sh\n',
+        'menu_item:main:Reeden Kobo - Return Home:cmd_spawn:quiet:exec /mnt/onboard/.adds/reeden-kobo/recover.sh\n'
+        'menu_item:main:Reeden SSH:cmd_spawn:quiet:exec /mnt/onboard/.adds/reeden-kobo/reeden-ssh.sh\n',
         encoding='utf-8',
+        newline='\n',
     )
     info = {
         'port_version': PORT_VERSION,
@@ -330,11 +386,12 @@ def assemble_package(core_dir: pathlib.Path, prebuilt_dir: pathlib.Path, dest: p
         'ui_assets_overlay': True,
         'font_sha256': sha256_file(dest / 'fonts/NotoSansCJKsc-Regular.otf'),
     }
-    (dest / 'build-info.json').write_text(json.dumps(info, indent=2) + '\n', encoding='utf-8')
+    (dest / 'build-info.json').write_text(json.dumps(info, indent=2) + '\n', encoding='utf-8', newline='\n')
 
+    cleanup_appledouble(dest)
     files = sorted(x for x in dest.rglob('*') if x.is_file() and x.name != 'SHA256SUMS')
     sums_text = ''.join(f'{sha256_file(x)}  {x.relative_to(dest).as_posix()}\n' for x in files)
-    (dest / 'SHA256SUMS').write_text(sums_text, encoding='utf-8')
+    (dest / 'SHA256SUMS').write_text(sums_text, encoding='utf-8', newline='\n')
     return len(files)
 
 
@@ -411,11 +468,12 @@ def install_to_usb_mount(pkg_dir: pathlib.Path, mount: pathlib.Path, allow_upgra
     stamp = datetime.datetime.now().strftime('%Y%m%d-%H%M%S')
     stage = mount / '.adds' / f'.reeden-kobo-stage-{stamp}'
     print(f'[4/4] 正在复制文件到 Kobo ({mount}) ...')
-    shutil.copytree(pkg_dir, stage)
+    copytree_fat32_safe(pkg_dir, stage)
 
     # Verify every written file on the USB mount against SHA256SUMS
-    print('      正在校验 Kobo 磁盘上的全部安装文件 SHA-256 ...')
-    for line in (stage / 'SHA256SUMS').read_text(encoding='utf-8').splitlines():
+    sums_lines = (stage / 'SHA256SUMS').read_text(encoding='utf-8').splitlines()
+    print(f'      正在校验 Kobo 磁盘上的全部 {len(sums_lines)} 个安装文件 SHA-256 ...')
+    for line in sums_lines:
         if not line.strip():
             continue
         digest, rel_str = line.split('  ', 1)
@@ -428,14 +486,16 @@ def install_to_usb_mount(pkg_dir: pathlib.Path, mount: pathlib.Path, allow_upgra
     if dest.exists():
         backup = mount / '.adds' / f'reeden-kobo-backup-{stamp}'
         dest.rename(backup)
-        for keep in ('userdata', 'storage'):
+        for keep in ('userdata', 'storage', 'diagnostics/ssh'):
             old_keep = backup / keep
             if old_keep.is_dir():
-                shutil.copytree(old_keep, stage / keep, dirs_exist_ok=True)
+                copytree_fat32_safe(old_keep, stage / keep)
 
     stage.rename(dest)
     try:
-        shutil.copy2(dest / 'nickelmenu.conf', entry)
+        shutil.copyfile(dest / 'nickelmenu.conf', entry)
+        cleanup_appledouble(nm_dir / '._reeden-kobo')
+        cleanup_appledouble(dest)
     except OSError as exc:
         raise RuntimeError(
             f'安装文件已写入 {dest}，但写入 NickelMenu 菜单项失败（{exc}）。\n'
@@ -444,7 +504,7 @@ def install_to_usb_mount(pkg_dir: pathlib.Path, mount: pathlib.Path, allow_upgra
     if backup is not None:
         print(f'✅ USB 一键升级完成！原阅读进度、笔记、冷暖光设置和书库已保留（旧版备份于 {backup.name}）。')
     else:
-        print('✅ USB 一键安装完成！所有 457 个文件已在 Kobo 磁盘上通过 SHA-256 校验。')
+        print(f'✅ USB 一键安装完成！所有 {len(sums_lines)} 个文件已在 Kobo 磁盘上通过 SHA-256 校验。')
     print('👉 下一步：安全弹出 Kobo USB 盘，回到 Kobo 原生主界面，点击右下角 NickelMenu →「Reeden Kobo (test)」即可启动。')
 
 
@@ -478,6 +538,23 @@ def install_via_ssh(
     ssh_read = ssh_base + ['-n', target]
     ssh_stream = ssh_base + [target]
 
+    # Pre-check remote device state before packing/streaming 78MB archive
+    probe_cmd = (
+        'if [ ! -d /mnt/onboard/.adds/nm ]; then echo ERR_NO_NM; '
+        'elif [ -d /mnt/onboard/.adds/reeden-kobo/state/active ]; then echo ERR_ACTIVE; '
+        'elif [ -e /mnt/onboard/.adds/reeden-kobo ] || [ -e /mnt/onboard/.adds/nm/reeden-kobo ]; then echo HAS_EXISTING; '
+        'else echo READY_FRESH; fi'
+    )
+    probe = subprocess.run(ssh_read + [probe_cmd], text=True, capture_output=True, check=True)
+    state_lines = [ln.strip() for ln in probe.stdout.splitlines() if ln.strip() in ('ERR_NO_NM', 'ERR_ACTIVE', 'HAS_EXISTING', 'READY_FRESH')]
+    remote_state = state_lines[-1] if state_lines else 'UNKNOWN'
+    if remote_state == 'ERR_NO_NM':
+        raise RuntimeError('Kobo 上未检测到 NickelMenu (/mnt/onboard/.adds/nm)，请先安装 NickelMenu。')
+    if remote_state == 'ERR_ACTIVE':
+        raise RuntimeError('检测到 Kobo 上 Reeden 正在运行（state/active 存在）。请先在 Kobo 上同时按住左上角+右上角 2 秒退出 Reeden，再执行升级。')
+    if remote_state == 'HAS_EXISTING' and not allow_upgrade:
+        raise RuntimeError('检测到 Kobo 上已安装旧版 reeden-kobo。如需保留书库与阅读进度升级，请加上 --upgrade 参数。')
+
     stamp = datetime.datetime.now().strftime('%Y%m%d-%H%M%S')
     remote_stage = f'/mnt/onboard/.adds/.reeden-kobo-stage-{stamp}'
     archive = temp_root / f'transfer-{stamp}.tar.gz'
@@ -486,11 +563,6 @@ def install_via_ssh(
         for path in sorted(pkg_dir.iterdir()):
             tf.add(path, arcname=path.name, recursive=True)
 
-    if allow_upgrade:
-        precheck = 'test ! -d /mnt/onboard/.adds/reeden-kobo/state/active && test -d /mnt/onboard/.adds/nm'
-    else:
-        precheck = 'test ! -e /mnt/onboard/.adds/reeden-kobo && test ! -e /mnt/onboard/.adds/nm/reeden-kobo && test -d /mnt/onboard/.adds/nm'
-    subprocess.run(ssh_read + [precheck], check=True)
     subprocess.run(ssh_read + [f'mkdir {remote_stage}'], check=True)
     with archive.open('rb') as f:
         subprocess.run(ssh_stream + [f'tar -xzf - -C {remote_stage}'], stdin=f, check=True)
@@ -521,7 +593,7 @@ def main() -> int:
         help='手动指定 Kobo USB 挂载根目录（例如 /Volumes/KOBOeReader 或 E:\\）并一键安装',
     )
     parser.add_argument('--ssh', metavar='HOST', help='通过 Wi-Fi SSH 一键安装到指定 Kobo IP（例如 192.168.1.100）')
-    parser.add_argument('--port', default='2222', help='SSH 端口（KOReader SSH 默认为 2222，独立 SSH 可设为 2223）')
+    parser.add_argument('--port', default='2222', help='SSH 端口（KOReader SSH 默认为 2222，Reeden 独立 SSH 为 2223）')
     parser.add_argument('--known-hosts', help='可选 SSH known_hosts 文件路径（启用严格主机密钥校验）')
     parser.add_argument('--identity', help='可选 SSH 私钥文件路径')
     parser.add_argument('--password-auth', action='store_true', help='使用 SSH 密码认证')
@@ -593,7 +665,7 @@ def main() -> int:
         if sys.stdin.isatty():
             print('\n当前未检测到 USB 挂载的 Kobo，请选择安装方式：')
             print('  [1] 我现在插上 Kobo USB 数据线，连接后按回车一键安装（推荐，免 SSH）')
-            print('  [2] 通过 Wi-Fi SSH 无线一键安装（需在 Kobo 开启 KOReader SSH 或独立 SSH）')
+            print('  [2] 通过 Wi-Fi SSH 无线一键安装（需在 Kobo 开启 KOReader SSH 或 Reeden SSH）')
             print('  [3] 仅在当前目录生成 package/ 安装包文件夹')
             choice = input('请输入序号 [1/2/3，默认 1]: ').strip() or '1'
             if choice == '1':
@@ -606,7 +678,7 @@ def main() -> int:
                 return 0
             elif choice == '2':
                 host = input('请输入 Kobo 的局域网 IP 地址 (如 192.168.1.100): ').strip()
-                port = input('请输入 SSH 端口 [默认 2222]: ').strip() or '2222'
+                port = input('请输入 SSH 端口 [KOReader 默认 2222 / Reeden SSH 填 2223]: ').strip() or '2222'
                 install_via_ssh(
                     pkg_dir,
                     host=host,

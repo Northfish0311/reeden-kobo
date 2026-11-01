@@ -33,7 +33,7 @@ BACKUP=""
 if [ -e "$DEST" ]; then
     BACKUP="/mnt/onboard/.adds/reeden-kobo-backup-$(date +%Y%m%d-%H%M%S)"
     mv "$DEST" "$BACKUP"
-    for keep in userdata storage; do
+    for keep in userdata storage diagnostics/ssh; do
         if [ -d "$BACKUP/$keep" ]; then
             mkdir -p "$SOURCE/$keep"
             if ! cp -R "$BACKUP/$keep/." "$SOURCE/$keep/"; then

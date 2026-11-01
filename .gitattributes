@@ -1,0 +1,23 @@
+# Force LF line endings for all Kobo shell scripts, configs, and source files
+# so Windows git clone (core.autocrlf=true) never corrupts device scripts with CRLF.
+* text=auto eol=lf
+*.sh text eol=lf
+*.command text eol=lf
+scripts/lipc-get-prop text eol=lf
+scripts/lipc-set-prop text eol=lf
+*.conf text eol=lf
+*.py text eol=lf
+*.c text eol=lf
+*.h text eol=lf
+*.map text eol=lf
+*.json text eol=lf
+*.md text eol=lf
+*.yml text eol=lf
+*.bat text eol=crlf
+
+# Binary assets
+*.ttf binary
+*.otf binary
+*.so binary
+prebuilt/bin/* binary
+prebuilt/checks/* binary

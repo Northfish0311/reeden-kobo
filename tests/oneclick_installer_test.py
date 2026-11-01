@@ -39,7 +39,7 @@ def make_synthetic_deb(deb_path: pathlib.Path) -> None:
 with tempfile.TemporaryDirectory(prefix='reeden-oneclick-test-') as tmp:
     base = pathlib.Path(tmp)
 
-    # 1. Pure-Python .deb extraction + symlink copy resolution
+    # 1. Pure-Python .deb extraction + symlink copy resolution + CRLF normalization
     deb_file = base / 'test.deb'
     extract_out = base / 'deb-out'
     make_synthetic_deb(deb_file)
@@ -48,6 +48,12 @@ with tempfile.TemporaryDirectory(prefix='reeden-oneclick-test-') as tmp:
     copied_sym = extract_out / 'lib/arm-linux-gnueabihf/libfoo.so.1'
     assert real_so.is_file() and copied_sym.is_file() and not copied_sym.is_symlink()
     assert real_so.read_bytes() == copied_sym.read_bytes() == b'synthetic-armhf-shared-object'
+
+    crlf_src = base / 'crlf.sh'
+    crlf_dst = base / 'lf.sh'
+    crlf_src.write_bytes(b'#!/bin/sh\r\nset -eu\r\necho ok\r\n')
+    install_mod.copy_lf_script(crlf_src, crlf_dst)
+    assert crlf_dst.read_bytes() == b'#!/bin/sh\nset -eu\necho ok\n'
 
     # 2. USB one-click install + upgrade + guards
     pkg = base / 'pkg'
@@ -71,11 +77,15 @@ with tempfile.TemporaryDirectory(prefix='reeden-oneclick-test-') as tmp:
     assert (installed / 'hello.txt').read_text(encoding='utf-8') == 'version-1\n'
     assert (mount / '.adds/nm/reeden-kobo').is_file()
 
-    # Add user reading data & books
+    # Add user reading data, books, and diagnostics/ssh
     (installed / 'userdata').mkdir(parents=True)
     (installed / 'storage/books').mkdir(parents=True)
+    (installed / 'diagnostics/ssh').mkdir(parents=True)
     (installed / 'userdata/kobo-light.conf').write_text('warmth=60\n', encoding='utf-8')
     (installed / 'storage/books/novel.epub').write_text('book-bytes\n', encoding='utf-8')
+    (installed / 'diagnostics/ssh/reeden-ssh').write_text('dropbear-bin\n', encoding='utf-8')
+    # Simulate macOS AppleDouble pollution in .adds/nm
+    (mount / '.adds/nm/._reeden-kobo').write_bytes(b'\x00\x05\x16\x07appledouble')
 
     # Refuse overwrite when allow_upgrade=False
     try:
@@ -95,5 +105,7 @@ with tempfile.TemporaryDirectory(prefix='reeden-oneclick-test-') as tmp:
     assert (installed / 'hello.txt').read_text(encoding='utf-8') == 'version-2\n'
     assert (installed / 'userdata/kobo-light.conf').read_text(encoding='utf-8') == 'warmth=60\n'
     assert (installed / 'storage/books/novel.epub').read_text(encoding='utf-8') == 'book-bytes\n'
+    assert (installed / 'diagnostics/ssh/reeden-ssh').read_text(encoding='utf-8') == 'dropbear-bin\n'
+    assert not (mount / '.adds/nm/._reeden-kobo').exists()
 
 print('PASS: pure-Python .deb extraction, USB fresh install, overwrite guard, and data-preserving upgrade')
