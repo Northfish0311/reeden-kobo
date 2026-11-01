@@ -5,6 +5,7 @@ from pathlib import Path
 import hashlib
 import subprocess
 import tempfile
+import os
 
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE_SCRIPT = (ROOT / 'scripts' / 'install.sh').read_text(encoding='utf-8')
@@ -42,11 +43,27 @@ with tempfile.TemporaryDirectory(prefix='reeden-install-sh-test-') as tmp:
     dest = onboard / '.adds' / 'reeden-kobo'
     entry = onboard / '.adds' / 'nm' / 'reeden-kobo'
 
-    def run(stage: Path, *args):
+    stubs = base / 'stubs'
+    stubs.mkdir()
+    for command in ('cp', 'mv'):
+        wrapper = stubs / command
+        wrapper.write_text('''#!/bin/sh
+case "$FAULT:$0" in
+  copy:*/cp) case "$*" in */userdata/.*) exit 1;; esac;;
+  promote:*/mv) [ "$1" != "$TEST_STAGE" ] || exit 1;;
+  menu:*/mv) [ "$1" != -f ] || exit 1;;
+esac
+exec /bin/COMMAND "$@"
+'''.replace('COMMAND', command))
+        wrapper.chmod(0o755)
+
+    def run(stage: Path, *args, fault=''):
         staged = stage / 'install.sh'
         staged.write_text(script, encoding='utf-8')
         staged.chmod(0o755)
-        return subprocess.run(['sh', str(staged), *args], capture_output=True, text=True)
+        return subprocess.run(['sh', str(staged), *args], capture_output=True, text=True,
+                              env={**os.environ, 'PATH': str(stubs) + ':' + os.environ['PATH'],
+                                   'FAULT': fault, 'TEST_STAGE': str(stage)})
 
     # 1. Fresh install
     stage1 = build_stage(base, '20260101-000001', 'v1')
@@ -93,5 +110,16 @@ with tempfile.TemporaryDirectory(prefix='reeden-install-sh-test-') as tmp:
     assert r.returncode == 1 and 'Checksum failed' in r.stdout + r.stderr
     assert (dest / 'payload-v3.txt').is_file(), 'install must be untouched after checksum failure'
 
+    # Failures before and during commit must preserve both data and menu.
+    old_menu = entry.read_bytes()
+    for index, fault in enumerate(('copy', 'promote', 'menu')):
+        stage = build_stage(base, f'20260101-00001{index}', fault)
+        r = run(stage, '--upgrade', fault=fault)
+        assert r.returncode != 0, (fault, r.stdout, r.stderr)
+        assert (dest / 'payload-v3.txt').is_file(), fault
+        assert (dest / 'userdata/kobo-light.conf').read_text() == 'warmth=40\n', fault
+        assert entry.read_bytes() == old_menu, fault
+        assert not list(entry.parent.glob('.reeden-kobo-menu-*')), fault
+
 print('PASS: install.sh fresh install, overwrite refusal, active-session guard, '
-      'data-preserving upgrade with backup, and checksum refusal')
+      'data preservation, checksum refusal, and copy/promotion/menu rollback')

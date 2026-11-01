@@ -4,6 +4,7 @@
 #include <string.h>
 #include <fcntl.h>
 #include <unistd.h>
+#include <errno.h>
 #include <sys/ioctl.h>
 #include <linux/input.h>
 static bool (*pointer_filter)(FlutterPointerEvent *);
@@ -22,9 +23,9 @@ int touch_open(Touch *t){
     memset(t,0,sizeof(*t));t->fd=-1;t->current.id=-1;
     const char *p=getenv("REEDEN_TOUCH");if(!p)p="/dev/input/event1";
     t->fd=open(p,O_RDONLY|O_NONBLOCK|O_CLOEXEC);if(t->fd<0)return -1;
-    if(ioctl(t->fd,EVIOCGRAB,1)<0)return -1;
+    if(ioctl(t->fd,EVIOCGRAB,1)<0)goto fail;
     struct input_absinfo x={0},y={0},slot={0};
-    if(ioctl(t->fd,EVIOCGABS(ABS_MT_POSITION_X),&x)||ioctl(t->fd,EVIOCGABS(ABS_MT_POSITION_Y),&y)||x.maximum<=x.minimum||y.maximum<=y.minimum)return -1;
+    if(ioctl(t->fd,EVIOCGABS(ABS_MT_POSITION_X),&x)||ioctl(t->fd,EVIOCGABS(ABS_MT_POSITION_Y),&y)||x.maximum<=x.minimum||y.maximum<=y.minimum)goto fail;
     unsigned long caps[(ABS_MAX+8*sizeof(long))/(8*sizeof(long))];memset(caps,0,sizeof(caps));ioctl(t->fd,EVIOCGBIT(EV_ABS,sizeof(caps)),caps);
     t->slots=(caps[ABS_MT_SLOT/(8*sizeof(long))]>>(ABS_MT_SLOT%(8*sizeof(long))))&1;
     if(t->slots)ioctl(t->fd,EVIOCGABS(ABS_MT_SLOT),&slot);
@@ -32,6 +33,8 @@ int touch_open(Touch *t){
     for(int i=0;i<16;i++)t->contacts[i].id=-1;
     fprintf(stderr,"[touch] %s protocol=%s X=%d..%d Y=%d..%d transform=swap+mirrorX\n",p,t->slots?"B":"A",t->min_x,t->max_x,t->min_y,t->max_y);
     return 0;
+fail:
+    {int saved=errno;close(t->fd);t->fd=-1;errno=saved;return -1;}
 }
 static void cancel_all(Touch *t,FlutterEngine e,unsigned w,unsigned h){for(int i=0;i<16;i++){Contact *c=&t->contacts[i];if(c->down){send_pointer(e,c,kCancel,w,h,t);send_pointer(e,c,kRemove,w,h,t);}memset(c,0,sizeof(*c));c->id=-1;}}
 static void sync_contacts(Touch *t,FlutterEngine e,unsigned w,unsigned h){
@@ -65,4 +68,8 @@ void touch_process(Touch *t,FlutterEngine engine,unsigned w,unsigned h){
         }
     }
 }
-void touch_close(Touch *t,FlutterEngine e){if(e)cancel_all(t,e,1072,1448);if(t->fd>=0)close(t->fd);}
+void touch_close(Touch *t,FlutterEngine e){
+    if(e)cancel_all(t,e,1072,1448);
+    int fd=t->fd;t->fd=-1;
+    if(fd>=0)close(fd);
+}

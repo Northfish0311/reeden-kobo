@@ -266,7 +266,7 @@ static bool present(void *u,const void *pixels,size_t row,size_t height){
 static void send_json(const char *channel,const char *json){FlutterPlatformMessage m={.struct_size=sizeof(m),.channel=channel,.message=(const uint8_t*)json,.message_size=strlen(json)};FlutterEngineSendPlatformMessage(engine,&m);}
 int main(int argc,char **argv){
     (void)argc;(void)argv;setvbuf(stderr,NULL,_IONBF,0);root=getenv("REEDEN_KOBO_DIR");if(!root){fprintf(stderr,"Run through run.sh; REEDEN_KOBO_DIR missing\n");return 64;}
-    fprintf(stderr,"[host] Reeden Kobo experimental 0.7.0 / official core 1.43.1+780\n");
+    fprintf(stderr,"[host] Reeden Kobo experimental 0.7.1 / official core checked by installer\n");
 #ifdef REEDEN_HEADLESS_DIAGNOSTIC
     snprintf(heartbeat_path,sizeof(heartbeat_path),"%s/state/heartbeat",root);
 #else
@@ -389,8 +389,15 @@ int main(int argc,char **argv){
         if(power_worker>0&&now+250000000ULL<deadline)deadline=now+250000000ULL;
         if(escape_at&&escape_at+2000000000ULL<deadline)deadline=escape_at+2000000000ULL;
         if(acquired&&!sleeping){uint64_t update_at=display_deadline(&screen);if(update_at<deadline)deadline=update_at;}
-        struct pollfd fds[]={{wake_pipe[0],POLLIN,0},{touch.fd,POLLIN,0},{power,POLLIN,0}};
+        struct pollfd fds[]={{wake_pipe[0],POLLIN,0},{sleeping?-1:touch.fd,POLLIN,0},{power,POLLIN,0}};
         int n=poll(fds,3,wait_ms(deadline));if(n<0&&errno!=EINTR){perror("poll");break;}
+        if(n<0)continue;
+        bool input_error=false;
+        for(unsigned i=0;i<3;i++)if(fds[i].revents&(POLLNVAL|POLLERR|POLLHUP)){
+            fprintf(stderr,"[host] poll descriptor %u failed: revents=0x%x; restoring native UI\n",i,fds[i].revents);
+            input_error=true;
+        }
+        if(input_error)break;
         if(fds[0].revents&POLLIN){char buffer[128];while(read(wake_pipe[0],buffer,sizeof(buffer))>0){}}
         if(fds[1].revents&POLLIN)touch_process(&touch,engine,screen.v.xres,screen.v.yres);
         if(fds[2].revents&POLLIN){struct input_event ev[8];ssize_t k=read(power,ev,sizeof(ev));for(size_t i=0;k>0&&i<(size_t)k/sizeof(*ev);i++)if(ev[i].type==EV_KEY&&ev[i].code==KEY_POWER){

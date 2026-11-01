@@ -11,11 +11,12 @@ with tempfile.TemporaryDirectory(prefix="reeden-launcher-") as temp:
     for name in ("run.sh", "recover.sh"):
         shutil.copy2(ROOT / "scripts" / name, app / name)
         (app / name).chmod(0o755)
+    (app / "version").write_text("SN,4.9.77,4.46.23836,000-393\n")
     (app / "brightness").write_text("12\n")
     (app / "warmth").write_text("5\n")
     for name in ("run.sh", "recover.sh"):
         path = app / name
-        text = path.read_text().replace("/sys/class/backlight/mxc_msp430.0/brightness", str(app / "brightness")).replace("/sys/class/backlight/lm3630a_led/color", str(app / "warmth"))
+        text = path.read_text().replace("/mnt/onboard/.kobo/version", str(app / "version")).replace("/sys/class/backlight/mxc_msp430.0/brightness", str(app / "brightness")).replace("/sys/class/backlight/lm3630a_led/color", str(app / "warmth"))
         path.write_text(text)
     def script(path, text):
         path.write_text("#!/bin/sh\n" + text)
@@ -48,6 +49,10 @@ echo "$*" >> "$(dirname "$0")/../framebuffer-calls"
 [ "$1" = --verify ] && exit 0
 exec /bin/sleep 5
 ''')
+    (app / "version").write_text("SN,4.9.77,4.46.23836,000-391\n")
+    wrong = subprocess.run(["sh", str(app / "run.sh")], capture_output=True, timeout=10)
+    assert wrong.returncode == 12 and not (app / "framebuffer-calls").exists()
+    (app / "version").write_text("SN,4.9.77,4.46.23836,000-393\n")
     p = subprocess.run(["sh", str(app / "run.sh")], timeout=10)
     log = (app / "logs/launcher.log").read_text()
     assert p.returncode == 20, (p.returncode, log)

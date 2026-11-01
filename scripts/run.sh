@@ -1,6 +1,8 @@
 #!/bin/sh
 set -u
 . "$(dirname -- "$0")/session.sh"
+product=$(awk -F, '{print substr($NF,length($NF)-2)}' /mnt/onboard/.kobo/version 2>/dev/null)
+[ "$product" = 393 ] || { echo 'Only Kobo Clara Colour product 393 is supported; launch cancelled.'; exit 12; }
 mkdir -p "$APP/logs" "$STATE" "$APP/cache" "$APP/userdata" "$APP/storage/books" "$APP/storage/documents" "$APP/storage/screenshots" "$APP/userdata/.config" "$APP/userdata/.local/share" "$APP/userdata/.cache"
 exec >> "$APP/logs/launcher.log" 2>&1
 echo "[launcher] $(date)"

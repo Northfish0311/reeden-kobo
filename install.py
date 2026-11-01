@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Reeden Kobo (0.7.0) One-Click Builder & Installer.
+"""Reeden Kobo (0.7.1) One-Click Builder & Installer.
 
 Combines the verified MIT Kobo compatibility layer with the user's unmodified
-official Reeden Kindle 1.43.1+780 core and pinned Debian Bullseye ARMHF runtime
+official Reeden Kindle 1.43.1+780 or 1.43.2+791 core and pinned Debian Bullseye ARMHF runtime
 packages, then installs to a Kobo Clara Colour (393) via USB or SSH (or outputs
 a verified local package directory).
 
@@ -21,6 +21,8 @@ import shutil
 import ssl
 import subprocess
 import sys
+if sys.version_info < (3, 10):
+    sys.exit('需要 Python 3.10 或更新版本，请升级 Python 后重新运行安装器。')
 import tarfile
 import tempfile
 import urllib.error
@@ -39,7 +41,7 @@ SUPPORTED_CORES = {
     },
 }
 OFFICIAL_LATEST_URL = 'https://download.reeden.app/Reeden/latest/Reeden-kindle.zip'
-PORT_VERSION = '0.7.0-experimental'
+PORT_VERSION = '0.7.1-experimental'
 SUPPORTED_PRODUCT = '393'
 
 
@@ -171,13 +173,13 @@ def resolve_official_core(user_arg: str | None, temp_root: pathlib.Path, auto_do
             cache_zip = ROOT / 'cache' / 'Reeden-kindle.zip'
             cache_zip.parent.mkdir(parents=True, exist_ok=True)
             print(f'[1/4] 正在从 Reeden 官网下载最新安装包 ({OFFICIAL_LATEST_URL}) ...')
-            req = urllib.request.Request(OFFICIAL_LATEST_URL, headers={'User-Agent': 'reeden-kobo-installer/0.7.0'})
+            req = urllib.request.Request(OFFICIAL_LATEST_URL, headers={'User-Agent': 'reeden-kobo-installer/0.7.1'})
             with open_url_with_cert_fallback(req, timeout=180) as resp, cache_zip.open('wb') as out:
                 shutil.copyfileobj(resp, out)
             target = cache_zip
         elif sys.stdin.isatty():
             print('\n未在当前目录或「下载」目录自动找到 Reeden-kindle.zip。')
-            print('支持官方版本：1.43.2+791（当前官网最新版）或 1.43.1+780')
+            print('支持官方版本：1.43.2+791 或 1.43.1+780（白名单以本安装器为准）')
             entered = input('请将 Reeden-kindle.zip 拖入此窗口并按回车（直接按回车则自动从官网下载最新包）: ').strip()
             if entered:
                 target = clean_dragged_path(entered).resolve()
@@ -185,7 +187,7 @@ def resolve_official_core(user_arg: str | None, temp_root: pathlib.Path, auto_do
                 cache_zip = ROOT / 'cache' / 'Reeden-kindle.zip'
                 cache_zip.parent.mkdir(parents=True, exist_ok=True)
                 print(f'[1/4] 正在从 Reeden 官网下载最新安装包 ({OFFICIAL_LATEST_URL}) ...')
-                req = urllib.request.Request(OFFICIAL_LATEST_URL, headers={'User-Agent': 'reeden-kobo-installer/0.7.0'})
+                req = urllib.request.Request(OFFICIAL_LATEST_URL, headers={'User-Agent': 'reeden-kobo-installer/0.7.1'})
                 with open_url_with_cert_fallback(req, timeout=180) as resp, cache_zip.open('wb') as out:
                     shutil.copyfileobj(resp, out)
                 target = cache_zip
@@ -249,7 +251,7 @@ def download_verified(url: str, sha256: str, cache_dir: pathlib.Path, alt_dirs: 
     cache_dir.mkdir(parents=True, exist_ok=True)
     dest = cache_dir / filename
     print(f'      下载依赖: {filename} ...')
-    req = urllib.request.Request(url, headers={'User-Agent': 'reeden-kobo-installer/0.7.0'})
+    req = urllib.request.Request(url, headers={'User-Agent': 'reeden-kobo-installer/0.7.1'})
     with open_url_with_cert_fallback(req, timeout=60) as resp, dest.open('wb') as out:
         shutil.copyfileobj(resp, out)
     if sha256_file(dest) != sha256:
@@ -401,9 +403,9 @@ def assemble_package(
     for src in sorted((ROOT / 'vendor').glob('*LICENSE*')):
         copy_regular(src, dest / 'licenses' / src.name)
     copy_regular(ROOT / 'vendor/debian-runtime-manifest.json', dest / 'licenses/debian-runtime-manifest.json')
-    for src in sorted((ROOT / 'docs').glob('*')):
+    for src in sorted((ROOT / 'docs').rglob('*')):
         if src.is_file():
-            copy_regular(src, dest / 'docs' / src.name)
+            copy_regular(src, dest / 'docs' / src.relative_to(ROOT / 'docs'))
     for group in ('bin', 'runtime', 'checks'):
         for src in (dest / group).iterdir():
             if src.is_file():
@@ -411,9 +413,9 @@ def assemble_package(
 
     (dest / 'nickelmenu.conf').write_text(
         'menu_item:main:Reeden Kobo (test):cmd_spawn:quiet:exec /mnt/onboard/.adds/reeden-kobo/run.sh\n'
-        'menu_item:main:Reeden Kobo - Check:cmd_output:8000:/mnt/onboard/.adds/reeden-kobo/precheck.sh\n'
+        'menu_item:main:Reeden Kobo - Check:cmd_output:60000:/mnt/onboard/.adds/reeden-kobo/precheck.sh\n'
         'menu_item:main:Reeden Kobo - Return Home:cmd_spawn:quiet:exec /mnt/onboard/.adds/reeden-kobo/recover.sh\n'
-        'menu_item:main:Reeden SSH:cmd_spawn:quiet:exec /mnt/onboard/.adds/reeden-kobo/reeden-ssh.sh\n',
+        'menu_item:main:Reeden SSH - Stop:cmd_output:8000:/mnt/onboard/.adds/reeden-kobo/reeden-ssh.sh stop\n',
         encoding='utf-8',
         newline='\n',
     )
@@ -422,7 +424,7 @@ def assemble_package(
         'official_version': official_version,
         'model': 'Kobo Clara Colour (393)',
         'firmware': '4.46.23836',
-        'first_launch': 'USER_AUTHORIZED_SSH',
+        'first_launch': 'NOT_PERFORMED',
         'official_core_unmodified': True,
         'ui_assets_overlay': True,
         'font_sha256': sha256_file(dest / 'fonts/NotoSansCJKsc-Regular.otf'),
@@ -498,6 +500,8 @@ def install_to_usb_mount(pkg_dir: pathlib.Path, mount: pathlib.Path, allow_upgra
         )
     dest = mount / '.adds' / 'reeden-kobo'
     entry = nm_dir / 'reeden-kobo'
+    if entry.exists() and not dest.exists() and not allow_upgrade:
+        raise RuntimeError('已有同名 NickelMenu 配置，未覆盖；请检查后使用 --upgrade。')
     if dest.exists():
         if not allow_upgrade:
             raise RuntimeError(
@@ -506,42 +510,68 @@ def install_to_usb_mount(pkg_dir: pathlib.Path, mount: pathlib.Path, allow_upgra
         if (dest / 'state' / 'active').exists():
             raise RuntimeError('检测到 Reeden 会话锁 state/active 仍存在，请先正常退出 Reeden 再升级。')
 
+    keeps = ('userdata', 'storage', 'diagnostics/ssh')
+    needed = sum(p.stat().st_size for p in pkg_dir.rglob('*') if p.is_file())
+    for keep in keeps:
+        if (dest / keep).is_dir():
+            needed += sum(p.stat().st_size for p in (dest / keep).rglob('*') if p.is_file())
+    if shutil.disk_usage(mount).free < needed + 16 * 1024 * 1024:
+        raise RuntimeError('Kobo 剩余空间不足以安全安装并保留旧版备份，未改动原安装。')
     stamp = datetime.datetime.now().strftime('%Y%m%d-%H%M%S')
-    stage = mount / '.adds' / f'.reeden-kobo-stage-{stamp}'
-    print(f'[4/4] 正在复制文件到 Kobo ({mount}) ...')
-    copytree_fat32_safe(pkg_dir, stage)
-
-    # Verify every written file on the USB mount against SHA256SUMS
-    sums_lines = (stage / 'SHA256SUMS').read_text(encoding='utf-8').splitlines()
-    print(f'      正在校验 Kobo 磁盘上的全部 {len(sums_lines)} 个安装文件 SHA-256 ...')
-    for line in sums_lines:
-        if not line.strip():
-            continue
-        digest, rel_str = line.split('  ', 1)
-        written = stage.joinpath(*pathlib.PurePosixPath(rel_str).parts)
-        if sha256_file(written) != digest:
-            shutil.rmtree(stage, ignore_errors=True)
-            raise RuntimeError(f'USB 写入校验失败: {rel_str}，已清理临时目录，未改动原安装。')
-
+    stage = pathlib.Path(tempfile.mkdtemp(prefix='.reeden-kobo-stage-', dir=mount / '.adds'))
+    menu_stage = None
     backup = None
-    if dest.exists():
-        backup = mount / '.adds' / f'reeden-kobo-backup-{stamp}'
-        dest.rename(backup)
-        for keep in ('userdata', 'storage', 'diagnostics/ssh'):
-            old_keep = backup / keep
-            if old_keep.is_dir():
-                copytree_fat32_safe(old_keep, stage / keep)
-
-    stage.rename(dest)
+    promoted = False
     try:
-        shutil.copyfile(dest / 'nickelmenu.conf', entry)
+        menu_fd, menu_name = tempfile.mkstemp(prefix='.reeden-kobo-menu-', dir=nm_dir)
+        os.close(menu_fd)
+        menu_stage = pathlib.Path(menu_name)
+        print(f'[4/4] 正在复制文件到 Kobo ({mount}) ...')
+        copytree_fat32_safe(pkg_dir, stage)
+        sums_lines = (stage / 'SHA256SUMS').read_text(encoding='utf-8').splitlines()
+        print(f'      正在校验 Kobo 磁盘上的全部 {len(sums_lines)} 个安装文件 SHA-256 ...')
+        for line in sums_lines:
+            if not line.strip():
+                continue
+            digest, rel_str = line.split('  ', 1)
+            rel = pathlib.PurePosixPath(rel_str)
+            if rel.is_absolute() or '..' in rel.parts:
+                raise ValueError(f'不安全的安装路径: {rel_str}')
+            if sha256_file(stage.joinpath(*rel.parts)) != digest:
+                raise RuntimeError(f'USB 写入校验失败: {rel_str}')
+        # The old installation remains at its original path throughout copying.
+        for keep in keeps:
+            if (dest / keep).is_dir():
+                copytree_fat32_safe(dest / keep, stage / keep)
+        shutil.copyfile(stage / 'nickelmenu.conf', menu_stage)
+        cleanup_appledouble(stage)
+        if dest.exists():
+            backup = mount / '.adds' / f'reeden-kobo-backup-{stamp}-{stage.name.rsplit("-", 1)[-1]}'
+            dest.rename(backup)
+        stage.rename(dest)
+        promoted = True
+        # Replace the menu only after promotion, in the same filesystem.
+        os.replace(menu_stage, entry)
+    except BaseException:
+        try:
+            if promoted:
+                dest.rename(stage)
+            if backup is not None and backup.exists():
+                backup.rename(dest)
+        except OSError as rollback_error:
+            raise RuntimeError(f'自动恢复失败；旧版数据保留在 {backup}，新版位于 {dest if promoted else stage}。请勿删除这些目录。') from rollback_error
+        shutil.rmtree(stage, ignore_errors=True)
+        raise
+    finally:
+        if menu_stage is not None:
+            try:
+                menu_stage.unlink(missing_ok=True)
+            except OSError:
+                print(f'提示：临时菜单文件未能清理: {menu_stage}')
+    try:
         cleanup_appledouble(nm_dir / '._reeden-kobo')
-        cleanup_appledouble(dest)
-    except OSError as exc:
-        raise RuntimeError(
-            f'安装文件已写入 {dest}，但写入 NickelMenu 菜单项失败（{exc}）。\n'
-            f'请手动将 {dest / "nickelmenu.conf"} 的内容复制到 {entry} 后即可使用。'
-        ) from exc
+    except OSError:
+        print('提示：安装已完成，macOS 元数据文件需在弹出前手动清理。')
     if backup is not None:
         print(f'✅ USB 一键升级完成！原阅读进度、笔记、冷暖光设置和书库已保留（旧版备份于 {backup.name}）。')
     else:

@@ -55,11 +55,12 @@ copy(ROOT/'LICENSE',P/'licenses/adapter-MIT-LICENSE')
 copy(ROOT.parent/'deps/NotoSansCJKsc-Regular.otf',P/'fonts/NotoSansCJKsc-Regular.otf')
 for src in (ROOT/'vendor').glob('*LICENSE*'):copy(src,P/'licenses'/src.name)
 copy(ROOT/'vendor/debian-runtime-manifest.json',P/'licenses/debian-runtime-manifest.json')
-for src in (ROOT/'docs').glob('*'):copy(src,P/'docs'/src.name)
+for src in (ROOT/'docs').rglob('*'):
+    if src.is_file():copy(src,P/'docs'/src.relative_to(ROOT/'docs'))
 for src in (P/'runtime').iterdir():src.chmod(0o755)
 for src in (P/'bin').iterdir():src.chmod(0o755)
-(P/'nickelmenu.conf').write_text('menu_item:main:Reeden Kobo (test):cmd_spawn:quiet:exec /mnt/onboard/.adds/reeden-kobo/run.sh\nmenu_item:main:Reeden Kobo - Check:cmd_output:8000:/mnt/onboard/.adds/reeden-kobo/precheck.sh\nmenu_item:main:Reeden Kobo - Return Home:cmd_spawn:quiet:exec /mnt/onboard/.adds/reeden-kobo/recover.sh\nmenu_item:main:Reeden SSH:cmd_spawn:quiet:exec /mnt/onboard/.adds/reeden-kobo/reeden-ssh.sh\n')
-info={'port_version':'0.7.0-experimental','official_version':matched_version,'model':'Kobo Clara Colour (393)','firmware':'4.46.23836','first_launch':'USER_AUTHORIZED_SSH','official_core_unmodified':True,'ui_assets_overlay':True,'font_sha256':hashlib.sha256((P/'fonts/NotoSansCJKsc-Regular.otf').read_bytes()).hexdigest()}
+(P/'nickelmenu.conf').write_text('menu_item:main:Reeden Kobo (test):cmd_spawn:quiet:exec /mnt/onboard/.adds/reeden-kobo/run.sh\nmenu_item:main:Reeden Kobo - Check:cmd_output:60000:/mnt/onboard/.adds/reeden-kobo/precheck.sh\nmenu_item:main:Reeden Kobo - Return Home:cmd_spawn:quiet:exec /mnt/onboard/.adds/reeden-kobo/recover.sh\nmenu_item:main:Reeden SSH - Stop:cmd_output:8000:/mnt/onboard/.adds/reeden-kobo/reeden-ssh.sh stop\n')
+info={'port_version':'0.7.1-experimental','official_version':matched_version,'model':'Kobo Clara Colour (393)','firmware':'4.46.23836','first_launch':'NOT_PERFORMED','official_core_unmodified':True,'ui_assets_overlay':True,'font_sha256':hashlib.sha256((P/'fonts/NotoSansCJKsc-Regular.otf').read_bytes()).hexdigest()}
 (P/'build-info.json').write_text(json.dumps(info,indent=2)+'\n')
 # Empty mutable directories are excluded; checksums cover every shipped file.
 files=sorted(x for x in P.rglob('*') if x.is_file() and x.name!='SHA256SUMS')

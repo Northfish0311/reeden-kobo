@@ -1,11 +1,10 @@
 #!/bin/sh
-# Fast read-only environment & health check for NickelMenu cmd_output popup.
+# Environment and current-file integrity check for NickelMenu cmd_output popup.
 # Always exits 0 so NickelMenu displays the full diagnostic summary dialog.
 set -u
 APP=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-chmod 755 "$APP"/*.sh "$APP"/bin/* "$APP"/runtime/* "$APP"/checks/* 2>/dev/null || true
 
-echo "=== Reeden Kobo 0.7.0 Self-Check ==="
+echo "=== Reeden Kobo 0.7.1 Self-Check ==="
 
 # 1. Model & Firmware
 if [ -f /mnt/onboard/.kobo/version ]; then
@@ -49,11 +48,19 @@ else
     echo "[WARN] Frontlight/warmth sysfs path missing"
 fi
 
-# 5. Checksum verification state
-if [ -f "$APP/state/install-verified" ] || [ -f "$APP/install-verification.log" ]; then
-    echo "[OK] Package SHA-256: verified"
+# 5. Check the current files, never infer success from an old log/marker.
+if [ -f "$APP/SHA256SUMS" ]; then
+    check_log=$(mktemp /tmp/reeden-check-XXXXXX) || { echo '[FAIL] Unable to create checksum scratch file'; exit 0; }
+    trap 'rm -f "$check_log"' EXIT
+    trap 'exit 0' HUP INT TERM
+    if (cd "$APP" && sha256sum -c SHA256SUMS) > "$check_log" 2>&1; then
+        echo '[OK] Package SHA-256: current files verified'
+    else
+        echo '[FAIL] Package SHA-256: current file checksum failed'
+        tail -n 3 "$check_log"
+    fi
 else
-    echo "[INFO] Package SHA-256: will verify on first launch"
+    echo '[FAIL] Package SHA-256: manifest missing'
 fi
 
 # 6. Last launch status
