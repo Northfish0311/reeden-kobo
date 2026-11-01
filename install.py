@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Reeden Kobo (0.7.2) One-Click Builder & Installer.
+"""Reeden Kobo (0.7.3) One-Click Builder & Installer.
 
 Combines the verified MIT Kobo compatibility layer with the user's unmodified
 official Reeden Kindle 1.43.1+780 or 1.43.2+791 core and pinned Debian Bullseye ARMHF runtime
@@ -41,7 +41,7 @@ SUPPORTED_CORES = {
     },
 }
 OFFICIAL_LATEST_URL = 'https://download.reeden.app/Reeden/latest/Reeden-kindle.zip'
-PORT_VERSION = '0.7.2-experimental'
+PORT_VERSION = '0.7.3-experimental'
 SUPPORTED_PRODUCT = '393'
 
 
@@ -173,7 +173,7 @@ def resolve_official_core(user_arg: str | None, temp_root: pathlib.Path, auto_do
             cache_zip = ROOT / 'cache' / 'Reeden-kindle.zip'
             cache_zip.parent.mkdir(parents=True, exist_ok=True)
             print(f'[1/4] 正在从 Reeden 官网下载最新安装包 ({OFFICIAL_LATEST_URL}) ...')
-            req = urllib.request.Request(OFFICIAL_LATEST_URL, headers={'User-Agent': 'reeden-kobo-installer/0.7.2'})
+            req = urllib.request.Request(OFFICIAL_LATEST_URL, headers={'User-Agent': 'reeden-kobo-installer/0.7.3'})
             with open_url_with_cert_fallback(req, timeout=180) as resp, cache_zip.open('wb') as out:
                 shutil.copyfileobj(resp, out)
             target = cache_zip
@@ -187,7 +187,7 @@ def resolve_official_core(user_arg: str | None, temp_root: pathlib.Path, auto_do
                 cache_zip = ROOT / 'cache' / 'Reeden-kindle.zip'
                 cache_zip.parent.mkdir(parents=True, exist_ok=True)
                 print(f'[1/4] 正在从 Reeden 官网下载最新安装包 ({OFFICIAL_LATEST_URL}) ...')
-                req = urllib.request.Request(OFFICIAL_LATEST_URL, headers={'User-Agent': 'reeden-kobo-installer/0.7.2'})
+                req = urllib.request.Request(OFFICIAL_LATEST_URL, headers={'User-Agent': 'reeden-kobo-installer/0.7.3'})
                 with open_url_with_cert_fallback(req, timeout=180) as resp, cache_zip.open('wb') as out:
                     shutil.copyfileobj(resp, out)
                 target = cache_zip
@@ -251,7 +251,7 @@ def download_verified(url: str, sha256: str, cache_dir: pathlib.Path, alt_dirs: 
     cache_dir.mkdir(parents=True, exist_ok=True)
     dest = cache_dir / filename
     print(f'      下载依赖: {filename} ...')
-    req = urllib.request.Request(url, headers={'User-Agent': 'reeden-kobo-installer/0.7.2'})
+    req = urllib.request.Request(url, headers={'User-Agent': 'reeden-kobo-installer/0.7.3'})
     with open_url_with_cert_fallback(req, timeout=60) as resp, dest.open('wb') as out:
         shutil.copyfileobj(resp, out)
     if sha256_file(dest) != sha256:
@@ -478,6 +478,14 @@ def parse_kobo_product(mount: pathlib.Path) -> tuple[str, str]:
     return product, firmware
 
 
+def choose_kobo_usb_mount(mounts: list[pathlib.Path]) -> pathlib.Path:
+    if not mounts:
+        raise RuntimeError('未检测到 Kobo USB 盘，请连接数据线并在 Kobo 屏幕点击「连接」。')
+    if len(mounts) != 1:
+        raise RuntimeError('检测到多个 Kobo USB 盘，为避免操作错误设备已停止。请只连接一台，或用 --kobo-mount 指定根目录。')
+    return mounts[0]
+
+
 def install_to_usb_mount(pkg_dir: pathlib.Path, mount: pathlib.Path, allow_upgrade: bool) -> None:
     product, firmware = parse_kobo_product(mount)
     if product != SUPPORTED_PRODUCT:
@@ -652,16 +660,17 @@ def main() -> int:
         '--output',
         help='在电脑本地输出完整 package 目录的路径（如传此参数且未指定 --usb / --ssh，则仅在本地生成安装包）',
     )
-    parser.add_argument(
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument(
         '--usb',
         action='store_true',
         help='自动查找通过 USB 挂载的 KoboClaraColour (KOBOeReader) 并直接一键安装',
     )
-    parser.add_argument(
+    mode.add_argument(
         '--kobo-mount',
         help='手动指定 Kobo USB 挂载根目录（例如 /Volumes/KOBOeReader 或 E:\\）并一键安装',
     )
-    parser.add_argument('--ssh', metavar='HOST', help='通过 Wi-Fi SSH 一键安装到指定 Kobo IP（例如 192.168.1.100）')
+    mode.add_argument('--ssh', metavar='HOST', help='通过 Wi-Fi SSH 一键安装到指定 Kobo IP（例如 192.168.1.100）')
     parser.add_argument('--port', default='2222', help='SSH 端口（KOReader SSH 默认为 2222，Reeden 独立 SSH 为 2223）')
     parser.add_argument('--known-hosts', help='可选 SSH known_hosts 文件路径（启用严格主机密钥校验）')
     parser.add_argument('--identity', help='可选 SSH 私钥文件路径')
@@ -703,7 +712,7 @@ def main() -> int:
             mounts = detect_kobo_usb_mounts()
             if not mounts:
                 raise RuntimeError('未检测到通过 USB 挂载的 Kobo 设备，请确认 Kobo 已连接电脑并处于 USB 传书模式。')
-            install_to_usb_mount(pkg_dir, mounts[0], allow_upgrade=args.upgrade)
+            install_to_usb_mount(pkg_dir, choose_kobo_usb_mount(mounts), allow_upgrade=args.upgrade)
             return 0
         if args.ssh:
             install_via_ssh(
@@ -724,7 +733,7 @@ def main() -> int:
         # Interactive one-click flow when run with no mode arguments
         mounts = detect_kobo_usb_mounts()
         if mounts:
-            mount = mounts[0]
+            mount = choose_kobo_usb_mount(mounts)
             has_existing = (mount / '.adds' / 'reeden-kobo').exists()
             mode_label = '保留书库与进度升级' if has_existing else '全新安装'
             if sys.stdin.isatty():
@@ -746,8 +755,9 @@ def main() -> int:
                 mounts = detect_kobo_usb_mounts()
                 if not mounts:
                     raise RuntimeError('仍未检测到 KOBOeReader USB 盘，请确认连接后重试。')
-                has_existing = (mounts[0] / '.adds' / 'reeden-kobo').exists()
-                install_to_usb_mount(pkg_dir, mounts[0], allow_upgrade=True if has_existing else args.upgrade)
+                mount = choose_kobo_usb_mount(mounts)
+                has_existing = (mount / '.adds' / 'reeden-kobo').exists()
+                install_to_usb_mount(pkg_dir, mount, allow_upgrade=True if has_existing else args.upgrade)
                 return 0
             elif choice == '2':
                 host = input('请输入 Kobo 的局域网 IP 地址 (如 192.168.1.100): ').strip()

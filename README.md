@@ -1,4 +1,4 @@
-# Reeden Kobo 兼容层 (0.7.2 Experimental)
+# Reeden Kobo 兼容层 (0.7.3 Experimental)
 
 在 **Kobo Clara Colour（产品代码 393）** 上原字节运行官方 **Reeden Kindle（同时支持 `1.43.2+791` 与 `1.43.1+780`）** 核心的开源 C 宿主与硬件兼容层。
 
@@ -13,14 +13,14 @@
 - 程序及阅读数据安装在用户分区 `.adds/reeden-kobo`，菜单在 `.adds/nm/reeden-kobo`。不替换固件、系统库或开机启动项，不设置开机自启。运行时需要控制屏幕、触摸、电源和网络；恢复网络时可能回写 `/etc/resolv.conf`，恢复 DNS。
 - 开始前备份重要书籍和笔记。升级会保留旧安装和数据副本，需要足够剩余空间；不要在 Reeden 运行期间升级，也不要在写入时拔线。
 - 默认菜单不再提供开启 SSH 的入口，只保留 **Reeden SSH - Stop** 以便关闭旧版监听服务。可选诊断工具仅允许密钥认证，见 [SSH 说明](docs/SSH.md)。升级不自动终止现有 SSH 会话，旧服务需手动停止或重启设备。
-- [下载 v0.7.2 安装包](https://github.com/SSNQ/reeden-kobo/releases/tag/v0.7.2)。v0.7.0 和 v0.7.1 已被替代；不要混用旧标签自动生成的源码包和新版附件。
+- [下载 v0.7.3 安装包](https://github.com/SSNQ/reeden-kobo/releases/tag/v0.7.3)。v0.7.0 和 v0.7.1 已被替代；不要混用旧标签自动生成的源码包和新版附件。
 
 ### 退出和故障恢复
 
 1. 正常退出：同时按住屏幕左上角和右上角约 2 秒，返回 Kobo 原生界面。
 2. 软件恢复：若原生菜单可用，选择 **Reeden Kobo - Return Home**；已有 SSH 时可运行 `sh /mnt/onboard/.adds/reeden-kobo/recover.sh`。
 3. 若软件完全无响应，按设备的硬件强制关机/开机方式恢复。长按电源键可能需要较长时间，必要时接 USB 充电后重试；不能保证所有内核或硬件故障均可由软件恢复。
-4. 需卸载时先退出 Reeden；`uninstall.sh` 会移除自有菜单项、保留整个应用和阅读数据供备份。也可回到原生 USB 模式后备份并删除 `.adds/reeden-kobo` 及对应菜单文件。
+4. 需卸载时先退出 Reeden，再连接 USB，双击电脑端「一键卸载」脚本。默认保留完整备份，可选择删除当前安装及阅读数据；详见下方卸载步骤。
 
 ---
 
@@ -80,7 +80,7 @@ python3 install.py --official-core /path/to/Reeden-kindle.zip --output package
 
 ---
 
-## 三、核心适配特性 (0.7.2)
+## 三、核心适配特性 (0.7.3)
 
 - **原字节复用官方核心（双版本支持）**：同时支持 **`1.43.2+791`** 与 **`1.43.1+780`**，`libflutter_engine.so`、`libapp.so` 及原始资源保持原字节不变；不修改账号、授权或付费逻辑；禁用 Kindle 自更新覆盖 Kobo 宿主。
 - **墨水屏刷新策略（对齐 KOReader MTK）**：
@@ -91,7 +91,7 @@ python3 install.py --official-core /path/to/Reeden-kindle.zip --output package
 - **前光与冷暖光控制（自适应 `1.43.2+` 原生滑块与 `1.43.1` 叠画滑块）**：
   - **`1.43.2+791`**：直接对接 Reeden 官方 UI 原生新增的「暖光」滑块（`currentAmberLevel` `0..24` 映射至底层 `lm3630a_led/color` `10..0` 反向混光），自动持久化至 `userdata/kobo-light.conf`
   - **`1.43.1+780`**：在「书页中央 → 显示」前光行下方合成硬件「冷暖」控制行（0 最冷 ～ 100 最暖，10% 步进）
-- **电源键锁屏（含 `1.43.2+` 彩色与透明叠底锁屏）、深度休眠与隔夜唤醒保护 (0.7.2)**：
+- **电源键锁屏（含 `1.43.2+` 彩色与透明叠底锁屏）、深度休眠与唤醒恢复 (0.7.3)**：
   - 支持「自定义锁屏画面」（在 `1.43.2+791` 下支持 3/4 通道 **RGB 彩色锁屏封面**与**透明区域叠在当前书页上**），短按电源键锁屏并进入 Linux `mem` 深度休眠（充电时按 MTK 限制仅锁屏关灯、跳过内核深睡），再按直接唤醒回到当前书页
   - 使用独立非 `SIGCHLD` (`__WCLONE`) 监督进程等待休眠脚本，避免与 Dart 3.12.2 全局 `wait()` 回收线程竞争导致唤醒卡死
   - 记录 `preparing / suspended / resuming / complete` 阶段时间戳；准备或唤醒恢复超过 45 秒由 `guardian.sh` 自动恢复 Kobo 原生界面
@@ -109,13 +109,44 @@ python3 install.py --official-core /path/to/Reeden-kindle.zip --output package
 4. **退出回原生系统**：同时按住屏幕 **左上角 + 右上角约 2 秒**。
 5. **紧急恢复与卸载**：
    - NickelMenu 点击 `Reeden Kobo - Return Home`，或 SSH 运行 `sh /mnt/onboard/.adds/reeden-kobo/recover.sh`
-   - 卸载（保留全部阅读数据与书籍）：退出后运行 `sh /mnt/onboard/.adds/reeden-kobo/uninstall.sh`
+   - 卸载：退出后连接 USB，双击电脑端「一键卸载」脚本，默认保留完整备份（见下一节）
+
+## 五、一键卸载（USB，免 SSH）
+
+1. 先退出 Reeden，回到 Kobo 原生主界面。如果开启过 Reeden SSH，先重启 Kobo 再卸载，以关闭仍在内存中的服务器和已有会话。
+2. 用 USB 连接电脑，在 Kobo 屏幕点「连接」，电脑出现 `KOBOeReader` 盘。
+3. 在本页安装 ZIP 解压目录双击 `一键卸载-macOS.command` 或 `一键卸载-Windows.bat`；Linux 运行 `sh 一键卸载-Linux.sh`。
+4. 按提示选择卸载方式，完成后安全弹出 USB。
+
+| 方式 | 程序与数据处理 | 磁盘空间 |
+|---|---|---|
+| 默认：保留完整备份 | 将整个当前安装改名为 `.adds/reeden-kobo-uninstalled-日期-随机码/`，移除未被修改的标准菜单 | 备份仍占空间；可复制到电脑后手动删除 |
+| 删除当前安装及数据 | 选择「2」，再输入 `DELETE REEDEN`；删除当前应用及其中的书籍、笔记、进度、诊断密钥 | 释放当前安装空间；以前升级/卸载的备份保持不动 |
+
+macOS 若拦截卸载脚本，右键打开或使用下方终端命令；也可参照安装脚本的隔离属性说明。
+
+卸载工具不需要官方安装包或联网，只需同目录的 `install.py` 和 Python 3.10+。它不移除 NickelMenu、KOReader、原生书库和固件。自定义菜单会保留并提示手动处理；如果同时接了多台 Kobo，工具会停止，要求明确指定设备。运行中的会话锁和符号链接路径会拒绝卸载。
+
+终端用法：
+
+```sh
+# 自动查找 USB 设备，交互确认（默认保留备份）
+python3 uninstall.py --usb
+
+# 手动指定设备，例如 Windows 的 E:\ 或 macOS 的 /Volumes/KOBOeReader
+python3 uninstall.py --kobo-mount /Volumes/KOBOeReader
+
+# 删除当前安装及阅读数据，仍需输入 DELETE REEDEN 确认
+python3 uninstall.py --usb --purge
+```
+
+备份恢复、残留目录清理和安装常见问题见 [安装与卸载指南](docs/安装与卸载.md)。备份含私人书籍、笔记和可能的诊断密钥，请勿上传到 GitHub 或发给别人。卸载中途拔线、磁盘损坏或断电仍可能需要人工恢复。
 
 详细验收记录与已知限制请参阅 [docs/测试说明.md](docs/测试说明.md)。
 
 ---
 
-## 五、从源码交叉编译与运行测试（开发者）
+## 六、从源码交叉编译与运行测试（开发者）
 
 本仓库已内置 `prebuilt/` 预编译二进制，普通用户无需编译。开发者如需自行从 C 源码交叉编译：
 
@@ -135,13 +166,13 @@ python3 install.py --official-core /path/to/Reeden-kindle.zip --output package
 
 ---
 
-## 六、验证范围与版本发布
+## 七、验证范围与版本发布
 
-[0.7.2 修复与验证](docs/releases/v0.7.2.md) 列出已完成的自动化测试和仍需实体检查的项目。隔离测试及 QEMU 不能替代隔夜休眠和真实功耗测量。
+[0.7.3 发布说明](docs/releases/v0.7.3.md) 和 [真机验收记录](docs/真机验收-0.7.2.md) 区分自动化验证与已完成的设备测试。隔离测试及 QEMU 不能替代隔夜休眠和真实功耗测量。
 
 新 Release 由标签 CI 构建：标签、源码 ZIP、安装 ZIP 的代码来自同一提交，附件提供 `COMMIT.txt` 和 `SHA256SUMS`。请勿忽略 Experimental 标记。旧历史中的路径及私人示例地址已清理，已有克隆请参阅 [历史清理说明](docs/历史清理.md)。
 
-## 七、开源许可与致谢
+## 八、开源许可与致谢
 
 - 适配层代码采用 [MIT License](LICENSE)。
 - 官方 Reeden 核心归 Reeden 官方所有，遵循其自身条款，严禁在公开仓库或衍生包中默认分发官方闭源二进制。
