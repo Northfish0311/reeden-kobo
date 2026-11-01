@@ -49,7 +49,7 @@ jobs:
             "tests/refresh_policy_test.c src/refresh_policy.c"
           do
             name=$(echo "$test_src" | awk '{print $1}' | xargs basename -s .c)
-            cc -O2 -Wall -Wextra -Werror -Iinclude -Isrc $test_src -lm -o "build/${name}-host"
+            /tmp/zig-linux-x86_64-0.13.0/zig cc -O2 -Wall -Wextra -Werror -Iinclude -Isrc $test_src -lm -o "build/${name}-host"
             "./build/${name}-host"
           done
           for py_test in tests/*.py; do
