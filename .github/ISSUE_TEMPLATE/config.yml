@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: 私密报告安全漏洞
+    url: https://github.com/SSNQ/reeden-kobo/security/advisories/new
+    about: 越界解包、凭证泄露或认证问题请勿提交到公开 Issue。
+  - name: 安装、升级与卸载指南
+    url: https://github.com/SSNQ/reeden-kobo/blob/main/docs/安装与卸载.md
+    about: 先核对支持机型、Python 要求及备份/恢复步骤。

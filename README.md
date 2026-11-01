@@ -1,8 +1,12 @@
-# Reeden Kobo 兼容层 (0.7.3 Experimental)
+# Reeden Kobo 兼容层 (0.7.4 Experimental)
 
 在 **Kobo Clara Colour（产品代码 393）** 上原字节运行官方 **Reeden Kindle（同时支持 `1.43.2+791` 与 `1.43.1+780`）** 核心的开源 C 宿主与硬件兼容层。
 
 > **合规与版权说明**：本仓库仅包含 MIT 协议的 Kobo 宿主适配代码、预编译适配层二进制及 SIL OFL 开源字体，**不包含任何 Reeden 官方闭源二进制或 Debian 发行版运行库文件**。安装脚本会在本地电脑上结合你自己下载的 `Reeden-kindle.zip`（原字节不改）与 Debian 官方镜像源一键完成组包与安装。
+
+> **非官方 / Experimental**：这是社区兼容层，不是 Reeden 或 Kobo 官方产品，不代表官方支持或背书。运行时拥有设备 root 权限并控制硬件；开始前请备份重要书籍和笔记，不能保证断电、损坏或所有配置都可恢复。
+>
+> **下载与电脑要求**：[最新 v0.7.4 一键安装/卸载包](https://github.com/SSNQ/reeden-kobo/releases/tag/v0.7.4)，需要 **Python 3.10+**。固定的 Bullseye 依赖免费 LTS 已结束，哈希校验不是持续安全更新；见 [依赖维护方案](docs/依赖安全维护.md)。
 
 ---
 
@@ -13,7 +17,7 @@
 - 程序及阅读数据安装在用户分区 `.adds/reeden-kobo`，菜单在 `.adds/nm/reeden-kobo`。不替换固件、系统库或开机启动项，不设置开机自启。运行时需要控制屏幕、触摸、电源和网络；恢复网络时可能回写 `/etc/resolv.conf`，恢复 DNS。
 - 开始前备份重要书籍和笔记。升级会保留旧安装和数据副本，需要足够剩余空间；不要在 Reeden 运行期间升级，也不要在写入时拔线。
 - 默认菜单不再提供开启 SSH 的入口，只保留 **Reeden SSH - Stop** 以便关闭旧版监听服务。可选诊断工具仅允许密钥认证，见 [SSH 说明](docs/SSH.md)。升级不自动终止现有 SSH 会话，旧服务需手动停止或重启设备。
-- [下载 v0.7.3 安装包](https://github.com/SSNQ/reeden-kobo/releases/tag/v0.7.3)。v0.7.0 和 v0.7.1 已被替代；不要混用旧标签自动生成的源码包和新版附件。
+- [下载 v0.7.4 安装包](https://github.com/SSNQ/reeden-kobo/releases/tag/v0.7.4)。v0.7.3 及以前已被替代；不要混用旧标签自动生成的源码包和新版附件。
 
 ### 退出和故障恢复
 
@@ -35,6 +39,17 @@
 | **电脑环境** | macOS / Windows / Linux，安装有 **Python 3.10+**（仅用标准库，无需安装 Zig、C 编译器或第三方包） |
 
 ---
+
+### 实测兼容性
+
+| 组合 | 状态 |
+|---|---|
+| Clara Colour（393）/ 固件 4.46.23836 / 官方 Kindle 1.43.2+791 | 本轮 0.7.2 基本实体验收通过；新工具与版本的验证范围另列 |
+| 同设备 / 官方 Kindle 1.43.1+780 | 历史测试通过，本轮未全面复测 |
+| 其他型号、固件或非白名单核心 | 不支持或未验证，不能推断兼容 |
+| macOS / Windows / Linux，Python 3.10/3.12 | USB 工具和启动脚本 CI；本轮实体 USB 升级仅测 macOS |
+
+详细 [兼容性测试表与真实设备截图](docs/兼容性.md) 区分实机、模拟盘、QEMU 和尚未验证的项目。
 
 ## 二、一键安装与升级（普通用户）
 
@@ -80,7 +95,7 @@ python3 install.py --official-core /path/to/Reeden-kindle.zip --output package
 
 ---
 
-## 三、核心适配特性 (0.7.3)
+## 三、核心适配特性 (0.7.4)
 
 - **原字节复用官方核心（双版本支持）**：同时支持 **`1.43.2+791`** 与 **`1.43.1+780`**，`libflutter_engine.so`、`libapp.so` 及原始资源保持原字节不变；不修改账号、授权或付费逻辑；禁用 Kindle 自更新覆盖 Kobo 宿主。
 - **墨水屏刷新策略（对齐 KOReader MTK）**：
@@ -91,7 +106,7 @@ python3 install.py --official-core /path/to/Reeden-kindle.zip --output package
 - **前光与冷暖光控制（自适应 `1.43.2+` 原生滑块与 `1.43.1` 叠画滑块）**：
   - **`1.43.2+791`**：直接对接 Reeden 官方 UI 原生新增的「暖光」滑块（`currentAmberLevel` `0..24` 映射至底层 `lm3630a_led/color` `10..0` 反向混光），自动持久化至 `userdata/kobo-light.conf`
   - **`1.43.1+780`**：在「书页中央 → 显示」前光行下方合成硬件「冷暖」控制行（0 最冷 ～ 100 最暖，10% 步进）
-- **电源键锁屏（含 `1.43.2+` 彩色与透明叠底锁屏）、深度休眠与唤醒恢复 (0.7.3)**：
+- **电源键锁屏（含 `1.43.2+` 彩色与透明叠底锁屏）、深度休眠与唤醒恢复 (0.7.4)**：
   - 支持「自定义锁屏画面」（在 `1.43.2+791` 下支持 3/4 通道 **RGB 彩色锁屏封面**与**透明区域叠在当前书页上**），短按电源键锁屏并进入 Linux `mem` 深度休眠（充电时按 MTK 限制仅锁屏关灯、跳过内核深睡），再按直接唤醒回到当前书页
   - 使用独立非 `SIGCHLD` (`__WCLONE`) 监督进程等待休眠脚本，避免与 Dart 3.12.2 全局 `wait()` 回收线程竞争导致唤醒卡死
   - 记录 `preparing / suspended / resuming / complete` 阶段时间戳；准备或唤醒恢复超过 45 秒由 `guardian.sh` 自动恢复 Kobo 原生界面
@@ -168,11 +183,19 @@ python3 uninstall.py --usb --purge
 
 ## 七、验证范围与版本发布
 
-[0.7.3 发布说明](docs/releases/v0.7.3.md) 和 [真机验收记录](docs/真机验收-0.7.2.md) 区分自动化验证与已完成的设备测试。隔离测试及 QEMU 不能替代隔夜休眠和真实功耗测量。
+[0.7.4 发布说明](docs/releases/v0.7.4.md) 和 [真机验收记录](docs/真机验收-0.7.2.md) 区分自动化验证与已完成的设备测试。隔离测试及 QEMU 不能替代隔夜休眠和真实功耗测量。
 
 新 Release 由标签 CI 构建：标签、源码 ZIP、安装 ZIP 的代码来自同一提交，附件提供 `COMMIT.txt` 和 `SHA256SUMS`。请勿忽略 Experimental 标记。旧历史中的路径及私人示例地址已清理，已有克隆请参阅 [历史清理说明](docs/历史清理.md)。
 
-## 八、开源许可与致谢
+## 八、安全反馈与实机截图
+
+安全漏洞使用 [私密报告](https://github.com/SSNQ/reeden-kobo/security/advisories/new)，普通问题用 [Bug 表单](https://github.com/SSNQ/reeden-kobo/issues/new?template=bug_report.yml)。请勿公开书库、原始备份、账号或密钥。维护范围见 [SECURITY.md](SECURITY.md)，本轮扫描范围和边界见 [安全检查记录](docs/安全检查-2026-11-01.md)。
+
+![Clara Colour 实际运行的 Reeden 首页](docs/images/clara-colour-home-20261101.png)
+
+2026-11-01 从用户准备的可公开页面读取设备帧缓冲，原始像素编码，无内容改绘；软件组合与限制见 [截图说明](docs/兼容性.md)。帧缓冲截图不能反映实际面板残影、白闪或前光，阅读统计不是续航测量。
+
+## 九、开源许可与致谢
 
 - 适配层代码采用 [MIT License](LICENSE)。
 - 官方 Reeden 核心归 Reeden 官方所有，遵循其自身条款，严禁在公开仓库或衍生包中默认分发官方闭源二进制。

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Reeden Kobo (0.7.3) One-Click Builder & Installer.
+"""Reeden Kobo (0.7.4) One-Click Builder & Installer.
 
 Combines the verified MIT Kobo compatibility layer with the user's unmodified
 official Reeden Kindle 1.43.1+780 or 1.43.2+791 core and pinned Debian Bullseye ARMHF runtime
@@ -17,8 +17,10 @@ import json
 import os
 import pathlib
 import platform
+import posixpath
 import shutil
 import ssl
+import stat
 import subprocess
 import sys
 if sys.version_info < (3, 10):
@@ -41,7 +43,7 @@ SUPPORTED_CORES = {
     },
 }
 OFFICIAL_LATEST_URL = 'https://download.reeden.app/Reeden/latest/Reeden-kindle.zip'
-PORT_VERSION = '0.7.3-experimental'
+PORT_VERSION = '0.7.4-experimental'
 SUPPORTED_PRODUCT = '393'
 
 
@@ -161,6 +163,79 @@ def clean_dragged_path(raw: str) -> pathlib.Path:
     return pathlib.Path(s).expanduser()
 
 
+def archive_parts(name: str, allow_root: bool = False) -> tuple[str, ...]:
+    """Accept a portable, relative archive path without rewriting unsafe names."""
+    if not name or name.startswith('/') or any(c in name for c in '\\:<>"|?*') or any(ord(c) < 32 for c in name):
+        raise ValueError(f'不安全的归档路径：{name!r}')
+    parts = tuple(p for p in name.split('/') if p not in ('', '.'))
+    reserved = {'CON', 'PRN', 'AUX', 'NUL', 'CONIN$', 'CONOUT$'}
+    reserved.update(f'{prefix}{i}' for prefix in ('COM', 'LPT') for i in '123456789¹²³')
+    for part in parts:
+        if part == '..' or part.endswith((' ', '.')) or part.split('.')[0].upper() in reserved:
+            raise ValueError(f'不安全的归档路径：{name!r}')
+    if not parts and not allow_root:
+        raise ValueError(f'空归档路径：{name!r}')
+    return parts
+
+
+def archive_target(root: pathlib.Path, parts: tuple[str, ...]) -> pathlib.Path:
+    root = root.resolve()
+    target = root
+    for part in parts:
+        target = target / part
+        if target.is_symlink():
+            raise ValueError('归档目标含符号链接，已拒绝解包')
+        if target.is_file() and target.stat().st_nlink > 1:
+            raise ValueError('归档目标含已有硬链接，已拒绝解包')
+    if not target.resolve().is_relative_to(root):
+        raise ValueError('归档目标越过解包根目录')
+    return target
+
+
+def validate_archive_layout(entries: list[tuple[tuple[str, ...], bool]]) -> None:
+    """Reject duplicate/case-colliding files and non-directory parent entries."""
+    types = {}
+    spellings = {}
+    for parts, is_dir in entries:
+        for i in range(1, len(parts) + 1):
+            prefix = parts[:i]
+            key = tuple(p.casefold() for p in prefix)
+            if key in spellings and spellings[key] != prefix:
+                raise ValueError('归档含大小写冲突的路径')
+            spellings[key] = prefix
+        if parts in types and not (is_dir and types[parts]):
+            raise ValueError('归档含重复文件路径')
+        types[parts] = is_dir
+    for parts in types:
+        for i in range(1, len(parts)):
+            if parts[:i] in types and not types[parts[:i]]:
+                raise ValueError('归档文件或链接被用作父目录')
+
+
+def extract_official_zip(archive: pathlib.Path, dest: pathlib.Path) -> None:
+    with zipfile.ZipFile(archive) as zf:
+        planned = []
+        for info in zf.infolist():
+            if info.orig_filename != info.filename:
+                raise ValueError('ZIP 文件名含被截断的字符')
+            parts = archive_parts(info.filename, allow_root=info.is_dir())
+            mode = stat.S_IFMT(info.external_attr >> 16)
+            if mode not in (0, stat.S_IFREG, stat.S_IFDIR) or (mode == stat.S_IFDIR and not info.is_dir()):
+                raise ValueError('官方 ZIP 含链接或特殊文件，已拒绝解包')
+            archive_target(dest, parts)
+            planned.append((info, parts))
+        validate_archive_layout([(parts, info.is_dir()) for info, parts in planned])
+        # Validate the complete archive before writing the first payload.
+        for info, parts in planned:
+            target = archive_target(dest, parts)
+            if info.is_dir():
+                target.mkdir(parents=True, exist_ok=True)
+            else:
+                target.parent.mkdir(parents=True, exist_ok=True)
+                with zf.open(info) as src, target.open('wb') as out:
+                    shutil.copyfileobj(src, out)
+
+
 def resolve_official_core(user_arg: str | None, temp_root: pathlib.Path, auto_download: bool = False) -> tuple[pathlib.Path, str]:
     target: pathlib.Path | None = None
     if user_arg:
@@ -173,7 +248,7 @@ def resolve_official_core(user_arg: str | None, temp_root: pathlib.Path, auto_do
             cache_zip = ROOT / 'cache' / 'Reeden-kindle.zip'
             cache_zip.parent.mkdir(parents=True, exist_ok=True)
             print(f'[1/4] 正在从 Reeden 官网下载最新安装包 ({OFFICIAL_LATEST_URL}) ...')
-            req = urllib.request.Request(OFFICIAL_LATEST_URL, headers={'User-Agent': 'reeden-kobo-installer/0.7.3'})
+            req = urllib.request.Request(OFFICIAL_LATEST_URL, headers={'User-Agent': 'reeden-kobo-installer/0.7.4'})
             with open_url_with_cert_fallback(req, timeout=180) as resp, cache_zip.open('wb') as out:
                 shutil.copyfileobj(resp, out)
             target = cache_zip
@@ -187,7 +262,7 @@ def resolve_official_core(user_arg: str | None, temp_root: pathlib.Path, auto_do
                 cache_zip = ROOT / 'cache' / 'Reeden-kindle.zip'
                 cache_zip.parent.mkdir(parents=True, exist_ok=True)
                 print(f'[1/4] 正在从 Reeden 官网下载最新安装包 ({OFFICIAL_LATEST_URL}) ...')
-                req = urllib.request.Request(OFFICIAL_LATEST_URL, headers={'User-Agent': 'reeden-kobo-installer/0.7.3'})
+                req = urllib.request.Request(OFFICIAL_LATEST_URL, headers={'User-Agent': 'reeden-kobo-installer/0.7.4'})
                 with open_url_with_cert_fallback(req, timeout=180) as resp, cache_zip.open('wb') as out:
                     shutil.copyfileobj(resp, out)
                 target = cache_zip
@@ -199,13 +274,18 @@ def resolve_official_core(user_arg: str | None, temp_root: pathlib.Path, auto_do
     if target.is_file() and zipfile.is_zipfile(target):
         extract_dir = temp_root / 'official-extracted'
         print(f'[1/4] 正在解压官方安装包 {target.name} ...')
-        with zipfile.ZipFile(target, 'r') as zf:
-            zf.extractall(extract_dir)
+        extract_official_zip(target, extract_dir)
         core_dir = find_core_dir_in(extract_dir)
     else:
         core_dir = find_core_dir_in(target)
     if core_dir is None:
         raise ValueError(f'在 {target} 中未找到包含 data/ 与 lib/ 的官方 reeden/reeden 目录')
+    if core_dir.is_symlink():
+        raise ValueError('官方核心目录不允许符号链接')
+    for path in core_dir.rglob('*'):
+        archive_parts(path.relative_to(core_dir).as_posix())
+        if path.is_symlink() or not (path.is_file() or path.is_dir()):
+            raise ValueError('官方核心目录含链接或特殊文件，已拒绝组包')
 
     actual_hashes = {}
     for name in ('libflutter_engine.so', 'libapp.so'):
@@ -251,7 +331,7 @@ def download_verified(url: str, sha256: str, cache_dir: pathlib.Path, alt_dirs: 
     cache_dir.mkdir(parents=True, exist_ok=True)
     dest = cache_dir / filename
     print(f'      下载依赖: {filename} ...')
-    req = urllib.request.Request(url, headers={'User-Agent': 'reeden-kobo-installer/0.7.3'})
+    req = urllib.request.Request(url, headers={'User-Agent': 'reeden-kobo-installer/0.7.4'})
     with open_url_with_cert_fallback(req, timeout=60) as resp, dest.open('wb') as out:
         shutil.copyfileobj(resp, out)
     if sha256_file(dest) != sha256:
@@ -269,50 +349,69 @@ def extract_deb_pure(deb_path: pathlib.Path, dest_dir: pathlib.Path) -> None:
     while pos + 60 <= len(data):
         hdr = data[pos:pos + 60]
         name = hdr[0:16].decode('ascii', errors='replace').strip()
-        size = int(hdr[48:58].decode('ascii').strip())
+        size_text = hdr[48:58].decode('ascii').strip()
+        if hdr[58:60] != b'`\n' or not size_text.isdigit():
+            raise ValueError('非法的 deb/ar 成员头或长度')
+        size = int(size_text)
         pos += 60
+        if size > len(data) - pos:
+            raise ValueError('deb/ar 成员数据截断')
         body = data[pos:pos + size]
         pos += size + (size % 2)
         if name.endswith('/'):
             name = name[:-1]
         if name.startswith('data.tar'):
+            if data_payload is not None:
+                raise ValueError('deb/ar 含多个 data.tar 成员')
             data_payload = body
-            break
+    if pos != len(data):
+        raise ValueError('deb/ar 尾部截断或格式异常')
     if data_payload is None:
         raise ValueError(f'未在 {deb_path} 中找到 data.tar.*')
 
     symlinks = []
     with tarfile.open(fileobj=io.BytesIO(data_payload), mode='r:*') as tf:
+        planned = []
         for member in tf.getmembers():
-            rel = pathlib.PurePosixPath(member.name)
-            parts = [p for p in rel.parts if p not in ('', '.')]
-            if not parts or '..' in parts:
-                continue
-            target = dest_dir.joinpath(*parts)
+            parts = archive_parts(member.name, allow_root=member.isdir())
+            if not (member.isdir() or member.isfile() or member.issym() or member.islnk()):
+                raise ValueError('deb 数据归档含特殊文件，已拒绝解包')
+            archive_target(dest_dir, parts)
+            if member.issym() or member.islnk():
+                link = member.linkname
+                if not link or link.startswith('/') or '\\' in link or ':' in link or any(ord(c) < 32 for c in link):
+                    raise ValueError('不安全的 deb 链接目标')
+                base = parts[:-1] if member.issym() else ()
+                relative = posixpath.normpath('/'.join((*base, link)))
+                source_parts = archive_parts(relative, allow_root=True)
+                archive_target(dest_dir, source_parts)
+                symlinks.append((parts, source_parts))
+            planned.append((member, parts))
+        validate_archive_layout([(parts, member.isdir()) for member, parts in planned])
+        for member, parts in planned:
+            target = archive_target(dest_dir, parts)
             if member.isdir():
                 target.mkdir(parents=True, exist_ok=True)
             elif member.isfile():
                 target.parent.mkdir(parents=True, exist_ok=True)
                 with tf.extractfile(member) as src:
                     target.write_bytes(src.read())
-            elif member.issym() or member.islnk():
-                symlinks.append((target, member.linkname, member.issym()))
 
-    for _ in range(4):
+    # Materialize links as regular file copies only inside the extraction root.
+    # Directory, missing and cyclic links remain absent (no host links created).
+    for _ in range(len(symlinks)):
         remaining = []
-        for target, linkname, is_sym in symlinks:
-            link_rel = pathlib.PurePosixPath(linkname)
-            if is_sym and not link_rel.is_absolute():
-                src_path = (target.parent / pathlib.Path(*link_rel.parts)).resolve()
-            else:
-                parts = [p for p in link_rel.parts if p not in ('', '/', '.')]
-                src_path = dest_dir.joinpath(*parts).resolve()
+        progress = False
+        for target_parts, source_parts in symlinks:
+            target = archive_target(dest_dir, target_parts)
+            src_path = archive_target(dest_dir, source_parts)
             if src_path.is_file():
                 target.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(src_path, target)
+                progress = True
             else:
-                remaining.append((target, linkname, is_sym))
-        if not remaining:
+                remaining.append((target_parts, source_parts))
+        if not remaining or not progress:
             break
         symlinks = remaining
 

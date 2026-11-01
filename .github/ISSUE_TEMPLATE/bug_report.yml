@@ -1,0 +1,57 @@
+name: Bug 反馈
+description: 安装、卸载、显示、灯光或休眠问题；安全漏洞请走私密报告。
+title: "[Bug] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        请勿上传原始书库、笔记数据库、完整备份或 SSH 密钥。安全漏洞使用 [私密报告](https://github.com/SSNQ/reeden-kobo/security/advisories/new)。
+        软件完全无响应时，先按 README 的恢复步骤处理；这里只记录问题，不保证立即提供修复。
+  - type: input
+    id: port
+    attributes:
+      label: 适配层版本或提交
+      placeholder: 例如 v0.7.4
+    validations:
+      required: true
+  - type: input
+    id: device
+    attributes:
+      label: 设备型号、产品代码与固件
+      placeholder: 例如 Clara Colour / 393 / 4.46.23836
+    validations:
+      required: true
+  - type: input
+    id: official
+    attributes:
+      label: 官方 Reeden 版本
+      placeholder: 例如 Kindle 1.43.2+791
+  - type: input
+    id: computer
+    attributes:
+      label: 电脑系统、Python 版本和安装方式
+      placeholder: 例如 Windows 11 / Python 3.12 / USB 保留数据升级
+  - type: textarea
+    id: steps
+    attributes:
+      label: 如何复现
+      description: 从哪个界面开始、具体操作、预期结果和实际结果。
+    validations:
+      required: true
+  - type: textarea
+    id: power
+    attributes:
+      label: 电源或刷新相关补充（如适用）
+      description: USB 是否连接、是否充电、Wi-Fi 状态、黑底/白底/彩色内容、等待时长、电量变化。
+  - type: textarea
+    id: logs
+    attributes:
+      label: 已脱敏日志或截图（可选）
+      description: 仅贴相关片段；遮盖账号、书名/笔记、IP、序列号、API token 和密钥。不要上传整个日志或备份压缩包。
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: 隐私检查
+      options:
+        - label: 我确认提交内容不含可用凭证、私人笔记、密钥或未脱敏备份。
+          required: true

@@ -266,7 +266,7 @@ static bool present(void *u,const void *pixels,size_t row,size_t height){
 static void send_json(const char *channel,const char *json){FlutterPlatformMessage m={.struct_size=sizeof(m),.channel=channel,.message=(const uint8_t*)json,.message_size=strlen(json)};FlutterEngineSendPlatformMessage(engine,&m);}
 int main(int argc,char **argv){
     (void)argc;(void)argv;setvbuf(stderr,NULL,_IONBF,0);root=getenv("REEDEN_KOBO_DIR");if(!root){fprintf(stderr,"Run through run.sh; REEDEN_KOBO_DIR missing\n");return 64;}
-    fprintf(stderr,"[host] Reeden Kobo experimental 0.7.3 / official core checked by installer\n");
+    fprintf(stderr,"[host] Reeden Kobo experimental 0.7.4 / official core checked by installer\n");
 #ifdef REEDEN_HEADLESS_DIAGNOSTIC
     snprintf(heartbeat_path,sizeof(heartbeat_path),"%s/state/heartbeat",root);
 #else
