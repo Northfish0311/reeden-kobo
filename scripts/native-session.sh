@@ -46,6 +46,27 @@ stop)
 start)
     [ -f "$STATE/native-restart" ] || exit 0
     pidof nickel >/dev/null 2>&1 && exit 0
+    # dhcpcd-dbus also owns WPA control sockets and serves ScanResults to
+    # Nickel. Across our radio/supplicant restarts it can retain stale sockets
+    # and report an empty scan even while wpa_cli sees the APs. Let the system
+    # bus activate a fresh bridge for the new Nickel, as on a normal boot.
+    # Do not restart the bus itself, or signal unrelated/reused PIDs.
+    for pid in $(pidof dhcpcd-dbus 2>/dev/null); do
+        start=$(token "$pid")
+        if same_process "$pid" "$start" && [ "$(readlink "/proc/$pid/exe")" = /libexec/dhcpcd-dbus ]; then
+            kill -TERM "$pid" 2>/dev/null || :
+            attempt=0
+            while same_process "$pid" "$start"; do
+                [ "$(awk '{print $3}' "/proc/$pid/stat" 2>/dev/null)" != Z ] || break
+                if [ "$attempt" -ge 20 ]; then
+                    echo '[native] network bridge did not exit; leaving it for the system bus' >> "$APP/logs/launcher.log"
+                    break
+                fi
+                usleep 100000; attempt=$((attempt+1))
+            done
+            echo '[native] network bridge reset requested before Nickel restart' >> "$APP/logs/launcher.log"
+        fi
+    done
     unset LD_PRELOAD LD_AUDIT LC_ALL XDG_CONFIG_HOME XDG_DATA_HOME XDG_CACHE_HOME
     export HOME=/root TMPDIR=/tmp LD_LIBRARY_PATH=/usr/local/Kobo
     export PATH=/usr/local/Kobo:/usr/sbin:/usr/bin:/sbin:/bin

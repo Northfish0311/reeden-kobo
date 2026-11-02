@@ -2,7 +2,14 @@
 # During pre-render warmup Nickel owns the hardware. Do not change its light.
 [ -n "${REEDEN_KOBO_DIR:-}" ] && [ -f "$REEDEN_KOBO_DIR/state/handoff" ] || exit 69
 while [ "$#" -gt 3 ]; do shift; done
-[ "$#" = 3 ] && [ "$1" = com.lab126.powerd ] || exit 64
+[ "$#" = 3 ] || exit 64
+case "$1:$2:$3" in
+  com.lab126.cmd:wirelessEnable:0|com.lab126.wifid:enable:0)
+    exec "$REEDEN_KOBO_DIR/wifi.sh" off;;
+  com.lab126.cmd:wirelessEnable:1|com.lab126.wifid:enable:1)
+    exec "$REEDEN_KOBO_DIR/wifi.sh" on;;
+esac
+[ "$1" = com.lab126.powerd ] || exit 69
 case "$3" in ''|*[!0-9]*) exit 64;; esac
 case "$2" in
   flIntensity)

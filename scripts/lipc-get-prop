@@ -27,7 +27,13 @@ case "$1:$2" in
     case "$s" in Charging|Full) echo 1;; *) echo 0;; esac
     ;;
   com.lab126.wifid:cmState)
-    if /sbin/ifconfig wlan0 2>/dev/null | grep -q 'inet addr:'; then echo CONNECTED; else echo NA; fi
+    exec "${REEDEN_KOBO_DIR:?}/wifi.sh" status
+    ;;
+  com.lab126.cmd:wirelessEnable|com.lab126.wifid:enable)
+    exec "${REEDEN_KOBO_DIR:?}/wifi.sh" enabled
+    ;;
+  com.lab126.wifid:signalStrength)
+    exec "${REEDEN_KOBO_DIR:?}/wifi.sh" signal
     ;;
   com.lab126.btfd:BTstate|com.lab126.btfd:BTenable)
     echo 0

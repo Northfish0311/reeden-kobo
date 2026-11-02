@@ -489,7 +489,7 @@ def assemble_package(
             copy_regular(src, dest / 'checks' / src.name)
     for name in [
         'run.sh', 'session.sh', 'recover.sh', 'guardian.sh',
-        'native-session.sh', 'power.sh', 'precheck.sh', 'reeden-ssh.sh',
+        'native-session.sh', 'power.sh', 'wifi.sh', 'precheck.sh', 'reeden-ssh.sh',
         'uninstall.sh', 'install.sh', 'verify.sh',
     ]:
         copy_lf_script(ROOT / 'scripts' / name, dest / name, 0o755)

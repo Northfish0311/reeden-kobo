@@ -12,6 +12,10 @@ typedef struct {
     uint64_t last_present,first_dirty,request_clean_at,last_clean;
     unsigned clean_refreshes,gray_refreshes,color_refreshes,night_refreshes,last_waveform;
     unsigned completed_marker; bool hw_inverted,hw_state_known,use_light_overlay;
+    int page_turn_direction; uint64_t page_turn_until;
+    bool page_turn_vertical; unsigned page_turn_steps;
+    unsigned animated_refreshes;
+    bool direct_night; unsigned localized_color_refreshes;
 } Display;
 typedef struct { int id,x,y; bool active,seen,down; double last_x,last_y; } Contact;
 typedef struct {
@@ -24,6 +28,7 @@ bool display_present(Display *,const void *,size_t,size_t);
 void display_flush(Display *);
 void display_full(Display *);
 void display_request_full(Display *,unsigned);
+bool display_arm_page_turn(Display *,bool,bool,unsigned);
 uint64_t display_deadline(Display *);
 int display_cover(Display *,const char *,unsigned,unsigned,unsigned);
 int display_wait(Display *);

@@ -4,11 +4,12 @@
 #include <stdint.h>
 
 typedef struct { unsigned left,top,width,height; } RefreshRegion;
+enum { REFRESH_BANDS_MAX=32 };
 typedef struct {
     RefreshRegion region;
     uint32_t waveform,flags;
     unsigned changed;
-    bool clean,major,color,night,polarity_changed,hw_invert;
+    bool clean,major,color,night,polarity_changed,hw_invert,frame_color,frame_night;
 } RefreshPlan;
 
 enum { REFRESH_GC16=2, REFRESH_GLR16=4, REFRESH_GCK16=8,
@@ -25,3 +26,12 @@ bool refresh_plan(const uint8_t *old,const uint8_t *next,size_t stride,
 uint64_t refresh_deadline(uint64_t pixels_due,uint64_t clean_due,
                           uint64_t next_allowed,uint64_t now);
 bool refresh_duplicate_clean(uint64_t now,uint64_t last_clean,bool same_pixels);
+/* Non-overlapping, 16-pixel-aligned bands; forward reveals right to left. */
+bool refresh_band(unsigned width,unsigned height,unsigned steps,unsigned index,
+                  bool forward,RefreshRegion *out);
+enum { REFRESH_PARTS_MAX=17 };
+typedef struct {RefreshRegion region;bool color;} RefreshPart;
+/* Sparse colored text on a dark page: keep CFA confined to aligned row
+ * groups. Dense color/photos return zero and retain the normal CFA path. */
+unsigned refresh_night_parts(const uint8_t *old,const uint8_t *next,size_t stride,
+                             unsigned width,unsigned height,RefreshPart *out);

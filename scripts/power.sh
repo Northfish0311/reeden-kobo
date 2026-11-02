@@ -16,51 +16,27 @@ restore_power_flags() {
     if [ -f "$STATE/power-alarm" ]; then echo 0 > /sys/class/rtc/rtc0/wakealarm; rm -f "$STATE/power-alarm"; fi
 }
 stop_network() {
-    # dhcpcd may remove the current DNS configuration when releasing a lease.
-    # Keep it for the next owner, without reading saved Wi-Fi credentials.
-    if [ -f /etc/resolv.conf ]; then cp /etc/resolv.conf "$STATE/power-resolv"; fi
-    timeout 5 dhcpcd -d -k wlan0 || :
-    if [ -f "$STATE/power-resolv" ]; then
-        if ! cmp -s "$STATE/power-resolv" /etc/resolv.conf; then cat "$STATE/power-resolv" > /etc/resolv.conf; fi
-        rm -f "$STATE/power-resolv"
-    fi
-    timeout 5 wpa_cli -i wlan0 terminate || :
-    # Nickel may unlink the control socket while the daemon remains alive.
-    # Close those exact daemon PIDs before powering down the radio.
-    for pid in $(pidof wpa_supplicant 2>/dev/null); do
-        start=$(token "$pid")
-        if same_process "$pid" "$start" && [ "$(cat "/proc/$pid/comm")" = wpa_supplicant ]; then kill -TERM "$pid"; fi
-    done
-    sleep 1
-    ifconfig wlan0 down
-    echo 0 > /dev/wmtWifi
+    "$APP/wifi.sh" suspend
 }
 restore_network() {
     restore_power_flags
     if [ -f "$STATE/wifi-restore" ]; then
-        echo 0xDB9DB9 > /proc/driver/wmt_dbg
-        echo '7 9 0' > /proc/driver/wmt_dbg
-        sleep 1
-        echo 0xDB9DB9 > /proc/driver/wmt_dbg
-        echo '7 9 1' > /proc/driver/wmt_dbg
-        echo 1 > /dev/wmtWifi
-        sleep 1
-        ifconfig wlan0 up
-        if ! pidof wpa_supplicant >/dev/null; then
-            timeout 8 wpa_supplicant -D nl80211 -s -i wlan0 -c /etc/wpa_supplicant/wpa_supplicant.conf -C /var/run/wpa_supplicant -B || :
+        if "$APP/wifi.sh" resume; then
+            rm -f "$STATE/wifi-restore"
+            echo "[power] Wi-Fi services started; actual connection queried separately $(date)"
+        else
+            echo "[power] Wi-Fi restore failed; retaining retry marker $(date)"
         fi
-        timeout 8 dhcpcd -d -z wlan0 || :
-        rm -f "$STATE/wifi-restore"
-        echo "[power] radio and network services restarted $(date)"
     fi
 }
+
 case "${1:-}" in
 restore) restore_network; exit;;
 native)
     # A newly started Nickel must own Wi-Fi from the powered-down state.
     # Keeping our supplicant/radio up here can leave its scan UI out of sync.
     restore_power_flags
-    stop_network
+    if ! "$APP/wifi.sh" native; then echo '[power] native Wi-Fi power-down failed'; exit 1; fi
     rm -f "$STATE/wifi-restore"
     echo "[power] Wi-Fi handed to native UI in powered-down state $(date)"
     exit;;
@@ -85,7 +61,7 @@ if [ "$(cat /sys/class/power_supply/bd71827_bat/status)" != Discharging ]; then
 fi
 if ifconfig wlan0 2>/dev/null | grep -q 'UP '; then
     : > "$STATE/wifi-restore"
-    stop_network
+    stop_network || exit 4
 fi
 [ ! -f "$STATE/power-cancel" ] || exit 2
 echo 1 > /sys/power/state-extended || exit 4

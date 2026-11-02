@@ -15,6 +15,7 @@ struct rect { uint32_t top,left,width,height; };
 struct update { struct rect region; uint32_t waveform,mode,marker,flags; int dither; };
 #define SEND_UPDATE 0x4024462eUL
 #define WAIT_COMPLETE 0xc008462fUL
+#define WAIT_SUBMISSION 0x40044637UL
 _Static_assert(sizeof(struct update)==36,"HWTCON update ABI");
 uint64_t monotonic_ns(void){struct timespec t;clock_gettime(CLOCK_MONOTONIC,&t);return (uint64_t)t.tv_sec*1000000000+t.tv_nsec;}
 int read_number(const char *p,int fallback){FILE *f=fopen(p,"r");int n=fallback;if(f){if(fscanf(f,"%d",&n)!=1)n=fallback;fclose(f);}return n;}
@@ -84,6 +85,88 @@ void display_request_full(Display *d,unsigned delay_ms){
     if(!d->request_clean_at||due<d->request_clean_at)d->request_clean_at=due;
     pthread_mutex_unlock(&d->lock);
 }
+bool display_arm_page_turn(Display *d,bool forward,bool vertical,unsigned steps){
+    pthread_mutex_lock(&d->lock);
+    bool ready=d->mem&&d->committed_valid&&steps>=2&&steps<=REFRESH_BANDS_MAX;
+    if(ready){d->page_turn_direction=forward?1:-1;d->page_turn_vertical=vertical;d->page_turn_steps=steps;d->page_turn_until=monotonic_ns()+2500000000ULL;}
+    pthread_mutex_unlock(&d->lock);return ready;
+}
+static unsigned next_marker(Display *d){if(++d->marker==0)++d->marker;return d->marker;}
+/* Every region reads the same immutable final framebuffer. Fence all accepted
+ * markers before another framebuffer/global inversion change, including on
+ * a partial failure. Never wait on a marker rejected by SEND_UPDATE. */
+static int submit_sequence(Display *d,struct update *updates,unsigned n,struct update *last,uint64_t gap_ns){
+    uint32_t markers[REFRESH_BANDS_MAX];unsigned count=0;bool failed=false;
+    uint64_t first_submit=0,last_submit=0,min_gap=UINT64_MAX;
+    if(!n||n>REFRESH_BANDS_MAX)return 0;
+    for(unsigned i=0;i<n;i++){
+        /* Submission acceptance can return before a visible panel change.
+         * Keep animated bands separated even when the driver queues quickly;
+         * normal mixed-color regions have no deliberate delay. */
+        if(gap_ns&&last_submit){
+            uint64_t now=monotonic_ns(),due=last_submit+gap_ns;
+            if(now<due){
+                struct timespec delay={(time_t)((due-now)/1000000000ULL),(long)((due-now)%1000000000ULL)};
+                while(nanosleep(&delay,&delay)<0&&errno==EINTR){}
+            }
+        }
+        struct update u=updates[i];u.marker=next_marker(d);
+        uint64_t submitted_at=gap_ns?monotonic_ns():0;
+        if(ioctl(d->fd,SEND_UPDATE,&u)<0){failed=true;break;}
+        if(gap_ns){
+            if(!first_submit)first_submit=submitted_at;
+            if(last_submit&&submitted_at-last_submit<min_gap)min_gap=submitted_at-last_submit;
+            last_submit=submitted_at;
+        }
+        markers[count++]=u.marker;*last=u;
+        uint32_t marker=u.marker;
+        if(ioctl(d->fd,WAIT_SUBMISSION,&marker)<0){failed=true;break;}
+    }
+    for(unsigned i=0;i<count;i++){
+        uint32_t marker[2]={markers[i],0};
+        if(ioctl(d->fd,WAIT_COMPLETE,marker)<0){
+            fprintf(stderr,"[display-sequence] completion failed: %s\n",strerror(errno));app_quit=1;return -1;
+        }
+    }
+    /* A rejected marker was never submitted and cannot be waited on. */
+    d->completed_marker=d->marker;
+    if(failed){fprintf(stderr,"[display-sequence] submission failed; restoring normal page update\n");return 0;}
+    if(gap_ns&&count>1)fprintf(stderr,"[page-turn] submissions=%u span_ms=%.1f min_gap_ms=%.1f\n",count,(last_submit-first_submit)/1000000.0,min_gap/1000000.0);
+    return 1;
+}
+/* Color pages and explicit cleans never use the animation sweep. */
+static int page_turn_bands(Display *d,bool forward,bool night,struct update *last){
+    unsigned steps=d->page_turn_steps;struct update updates[REFRESH_BANDS_MAX];
+    for(unsigned i=0;i<steps;i++){
+        RefreshRegion r;
+        unsigned w=d->page_turn_vertical?d->v.yres:d->v.xres,h=d->page_turn_vertical?d->v.xres:d->v.yres;
+        if(!refresh_band(w,h,steps,i,forward,&r))return 0;
+        if(d->page_turn_vertical)r=(RefreshRegion){0,r.left,r.height,r.width};
+        updates[i]=(struct update){.region={r.top,r.left,r.width,r.height},
+            .waveform=night?REFRESH_GLKW16:REFRESH_GCK16,.mode=0,.flags=0x8000};
+    }
+    /* A narrower advancing edge rather than ten page-height coarse blocks.
+     * The original speed setting controls both band count and pacing. */
+    uint64_t gap_ns=steps<=16?6000000ULL:steps<=24?8000000ULL:10000000ULL;
+    int result=submit_sequence(d,updates,steps,last,gap_ns);if(result!=1)return result;
+    d->animated_refreshes++;
+    fprintf(stderr,"[page-turn] bands=%u direction=%s vertical=%u night=%u\n",steps,forward?"next":"prev",d->page_turn_vertical,night);
+    return 1;
+}
+static int night_color_parts(Display *d,const RefreshPart *parts,unsigned n,struct update *last){
+    struct update updates[REFRESH_PARTS_MAX];unsigned color_rows=0;
+    for(unsigned i=0;i<n;i++){
+        RefreshRegion r=parts[i].region;
+        updates[i]=(struct update){.region={r.top,r.left,r.width,r.height},
+            .waveform=parts[i].color?REFRESH_GLRC16:REFRESH_GLKW16,
+            .mode=1,.flags=parts[i].color?REFRESH_CFA_G2:0};
+        if(parts[i].color)color_rows+=r.height;
+    }
+    int result=submit_sequence(d,updates,n,last,0);if(result!=1)return result;
+    d->localized_color_refreshes++;
+    fprintf(stderr,"[night-color] regions=%u cfa_rows=%u/%u\n",n,color_rows,d->v.yres);
+    return 1;
+}
 static uint64_t deadline_locked(Display *d){
     if(!d->frames)return UINT64_MAX;
     uint64_t interval=!strcmp(d->mode,"fast")?80000000ULL:140000000ULL;
@@ -115,13 +198,38 @@ static void flush(Display *d,const uint8_t *cover){
         d->dirty=false;pthread_mutex_unlock(&d->lock);return;
     }
     if(cover)plan.hw_invert=false;
+    else{
+        if(!plan.frame_night)d->direct_night=false;
+        else if(plan.frame_color)d->direct_night=true;
+        /* Keep the direct RGB path for this dark reading session after
+         * seeing color, even on later gray pages. Avoid toggling a global
+         * encoding flag every time one colored line enters/leaves view. */
+        if(d->direct_night)plan.hw_invert=false;
+    }
     bool inversion_change=!d->hw_state_known||d->hw_inverted!=plan.hw_invert;
     if(inversion_change){
         /* Every pixel's physical encoding changes with this GLOBAL flag. */
+        bool clean=plan.clean,target_inverted=plan.hw_invert;
         refresh_plan(d->committed_valid?d->committed:NULL,source,d->pending_stride,
                      d->v.xres,d->v.yres,true,d->mode,&plan);
-        if(cover)plan.hw_invert=false;
+        /* Re-encode all pixels without inventing a flashing cleanup. In
+         * particular, one colored word entering/leaving a dark page must
+         * retain GLRC16 instead of being promoted to a GCC16 white flash. */
+        if(!clean){
+            plan.clean=false;
+            plan.waveform=plan.color?REFRESH_GLRC16:plan.night?REFRESH_GLKW16:REFRESH_GLR16;
+        }
+        plan.hw_invert=target_inverted;
     }
+    RefreshPart parts[REFRESH_PARTS_MAX];unsigned part_count=0;
+    if(!cover&&!plan.clean&&plan.major&&plan.frame_night&&plan.color&&!plan.hw_invert)
+        part_count=refresh_night_parts(d->committed_valid?d->committed:NULL,source,
+                                     d->pending_stride,d->v.xres,d->v.yres,parts);
+    bool animate=!cover&&!plan.clean&&!plan.color&&!plan.frame_color&&!inversion_change&&plan.major&&
+        d->page_turn_direction&&now<=d->page_turn_until&&d->v.xres>=160;
+    bool forward=d->page_turn_direction>0;
+    if(cover||plan.major||plan.clean||now>d->page_turn_until)d->page_turn_direction=0;
+    if(animate||part_count)plan.region=(RefreshRegion){0,0,d->v.xres,d->v.yres};
     /* Wake before either wait or submit, as in KOReader's MTK path. */
     if(display_command("fiti_power 1")){perror("display wake");app_quit=1;pthread_mutex_unlock(&d->lock);return;}
     if(display_wait(d)<0){fprintf(stderr,"[display] wait for prior update failed: %s\n",strerror(errno));app_quit=1;pthread_mutex_unlock(&d->lock);return;}
@@ -148,8 +256,12 @@ static void flush(Display *d,const uint8_t *cover){
     {
         /* REAGL and Kaleido both require UPDATE_MODE_FULL on this model;
          * that flag does not itself mean a full-screen flashing cleanup. */
-        struct update u={.region={plan.region.top,plan.region.left,plan.region.width,plan.region.height},.waveform=plan.waveform,.mode=1,.marker=++d->marker,.flags=plan.flags};
-        if(ioctl(d->fd,SEND_UPDATE,&u)<0){fprintf(stderr,"[display] HWTCON_SEND_UPDATE failed: %s\n",strerror(errno));d->full=true;d->failures++;if(d->failures>=3)app_quit=1;}
+        struct update u={0};
+        int bands=animate?page_turn_bands(d,forward,plan.night,&u):
+                  part_count?night_color_parts(d,parts,part_count,&u):0;
+        if(bands<0){pthread_mutex_unlock(&d->lock);return;}
+        if(!bands)u=(struct update){.region={plan.region.top,plan.region.left,plan.region.width,plan.region.height},.waveform=plan.waveform,.mode=1,.marker=next_marker(d),.flags=plan.flags};
+        if(!bands&&ioctl(d->fd,SEND_UPDATE,&u)<0){fprintf(stderr,"[display] HWTCON_SEND_UPDATE failed: %s\n",strerror(errno));d->full=true;d->failures++;if(d->failures>=3)app_quit=1;}
         else {
             for(unsigned y=plan.region.top;y<endy;y++)memcpy(
                 d->committed+y*d->pending_stride+plan.region.left*4,

@@ -84,7 +84,50 @@ int main(void){
     /* Color outside a gray dirty region still prevents global HW inversion. */
     memset(old,0,bytes);pixel(old,10,10,200,0,0);memcpy(next,old,bytes);pixel(next,400,400,255,255,255);
     assert(refresh_plan(old,next,STRIDE,WIDTH,HEIGHT,false,"balanced",&p));
-    assert(!p.color&&!p.hw_invert&&p.night);
+    assert(!p.color&&!p.hw_invert&&p.night&&p.frame_color);
+    /* Animation bands cover each pixel exactly once in either direction. */
+    for(unsigned w=160;w<=1080;w+=8)for(unsigned steps=2;steps<=REFRESH_BANDS_MAX&&steps<=w/16;steps++){
+        unsigned coverage[1080]={0},previous=w;
+        for(unsigned i=0;i<steps;i++){
+            RefreshRegion band;
+            assert(refresh_band(w,1448,steps,i,true,&band));
+            assert(band.left%16==0&&band.width>0&&band.left+band.width==previous);
+            previous=band.left;
+            for(unsigned x=band.left;x<band.left+band.width;x++)coverage[x]++;
+        }
+        assert(previous==0);
+        for(unsigned x=0;x<w;x++)assert(coverage[x]==1);
+        unsigned left=0;
+        for(unsigned i=0;i<steps;i++){
+            RefreshRegion band;assert(refresh_band(w,1448,steps,i,false,&band));
+            assert(band.left==left);left+=band.width;
+        }
+        assert(left==w);
+    }
+    RefreshRegion band;
+    assert(!refresh_band(64,64,10,0,true,&band));
+    assert(!refresh_band(1072,1448,10,10,true,&band));
+    /* Sparse current and erased colored words get localized CFA row groups;
+     * every pixel belongs to exactly one disjoint region with a stable CFA phase. */
+    memset(old,0,bytes);memset(next,0,bytes);
+    pixel(next,400,400,200,0,0);pixel(old,300,900,0,200,0);
+    RefreshPart parts[REFRESH_PARTS_MAX];
+    unsigned n=refresh_night_parts(old,next,STRIDE,WIDTH,HEIGHT,parts);
+    assert(n>1);unsigned yend=0,color_rows=0;
+    bool new_color=false,old_color=false;
+    for(unsigned i=0;i<n;i++){
+        RefreshRegion r=parts[i].region;
+        assert(r.left==0&&r.width==WIDTH&&r.top==yend&&r.top%48==0&&r.height>0);
+        yend=r.top+r.height;
+        if(parts[i].color){
+            color_rows+=r.height;
+            if(r.top<=400&&yend>400)new_color=true;
+            if(r.top<=900&&yend>900)old_color=true;
+        }
+    }
+    assert(yend==HEIGHT&&color_rows<HEIGHT/2&&new_color&&old_color);
+    for(unsigned y=0;y<HEIGHT;y++)for(unsigned x=0;x<WIDTH;x++)pixel(next,x,y,200,0,0);
+    assert(!refresh_night_parts(old,next,STRIDE,WIDTH,HEIGHT,parts));
     /* Merge nearby cleanup with pixels, while honoring long delays. */
     const uint64_t ms=1000000ULL;
     assert(refresh_deadline(40*ms,80*ms,0,0)==80*ms);

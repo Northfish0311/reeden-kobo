@@ -40,6 +40,51 @@ uint64_t refresh_deadline(uint64_t pixels_due,uint64_t clean_due,uint64_t next_a
 bool refresh_duplicate_clean(uint64_t now,uint64_t last_clean,bool same_pixels){
     return same_pixels&&last_clean&&now>=last_clean&&now-last_clean<=500000000ULL;
 }
+bool refresh_band(unsigned width,unsigned height,unsigned steps,unsigned index,
+                  bool forward,RefreshRegion *out){
+    if(!out||!width||!height||steps<2||steps>REFRESH_BANDS_MAX||index>=steps||width/16<steps)return false;
+    unsigned band=forward?steps-1-index:index;
+    unsigned left=(unsigned)((uint64_t)width*band/steps)/16*16;
+    unsigned right=band+1==steps?width:(unsigned)((uint64_t)width*(band+1)/steps)/16*16;
+    if(right<=left)return false;
+    *out=(RefreshRegion){left,0,right-left,height};return true;
+}
+unsigned refresh_night_parts(const uint8_t *old,const uint8_t *next,size_t stride,
+                             unsigned width,unsigned height,RefreshPart *out){
+    enum { ROW=48, TILES=(4096+ROW-1)/ROW };
+    if(!next||!out||!width||!height||width>4096||height>4096||stride<(size_t)width*4)return 0;
+    bool raw[TILES]={0},mask[TILES]={0};
+    unsigned tiles=(height+ROW-1)/ROW;
+    for(unsigned y=0;y<height;y++){
+        unsigned tile=y/ROW;
+        if(raw[tile])continue;
+        for(unsigned x=0;x<width;x++){
+            size_t at=(size_t)y*stride+x*4;
+            if(colored(next+at)||(old&&colored(old+at))){raw[tile]=true;break;}
+        }
+    }
+    /* 48 is a multiple of both the 16px update alignment and 3px CFA cell.
+     * One neighboring row group gives the CFA filter a margin around glyphs.
+     * Keep full width so every CFA group retains the original X phase. */
+    for(unsigned i=0;i<tiles;i++)if(raw[i]){
+        mask[i]=true;if(i)mask[i-1]=true;if(i+1<tiles)mask[i+1]=true;
+    }
+    unsigned color_rows=0,groups=0;
+    for(unsigned i=0;i<tiles;i++)if(mask[i]){
+        color_rows+=height-i*ROW<ROW?height-i*ROW:ROW;
+        if(!i||!mask[i-1])groups++;
+    }
+    if(!color_rows||color_rows>(uint64_t)height/2||groups>8)return 0;
+    unsigned n=0;
+    for(unsigned i=0;i<tiles;){
+        unsigned begin=i;bool color=mask[i];
+        while(i<tiles&&mask[i]==color)i++;
+        unsigned bottom=i*ROW;if(bottom>height)bottom=height;
+        if(n>=REFRESH_PARTS_MAX)return 0;
+        out[n++]=(RefreshPart){.region={0,begin*ROW,width,bottom-begin*ROW},.color=color};
+    }
+    return n;
+}
 bool refresh_plan(const uint8_t *old,const uint8_t *next,size_t stride,
                   unsigned width,unsigned height,bool requested_clean,
                   const char *mode,RefreshPlan *out) {
@@ -64,7 +109,9 @@ bool refresh_plan(const uint8_t *old,const uint8_t *next,size_t stride,
     RefreshRegion interior={width/20,height/10,width-width/10,height-height/5};
     int before=background_kind(old,stride,interior),after=background_kind(next,stride,interior);
     bool night=after>=0?after==1:before==1;
-    bool hw_invert=night&&!image_has_color(next,stride,width,height);
+    bool frame_night=night;
+    bool frame_color=image_has_color(next,stride,width,height);
+    bool hw_invert=night&&!frame_color;
     bool polarity_changed=old&&before>=0&&after>=0&&before!=after;
     /* Auto/manual cleanup belongs to the frontend. A second backend page
      * counter can flash immediately before the app's own scheduled cleanup. */
@@ -89,6 +136,6 @@ bool refresh_plan(const uint8_t *old,const uint8_t *next,size_t stride,
     if(!clean){int region_kind=background_kind(next,stride,(RefreshRegion){left,top,right-left+1,bottom-top+1});if(region_kind>=0)night=region_kind==1;}
     *out=(RefreshPlan){.region={left,top,right-left+1,bottom-top+1},
         .waveform=color?(clean?REFRESH_GCC16:REFRESH_GLRC16):night?(clean?REFRESH_GCK16:REFRESH_GLKW16):(clean?REFRESH_GC16:REFRESH_GLR16),.flags=color?REFRESH_CFA_G2:0,
-        .changed=changed,.clean=clean,.major=major,.color=color,.night=night,.polarity_changed=polarity_changed,.hw_invert=hw_invert};
+        .changed=changed,.clean=clean,.major=major,.color=color,.night=night,.polarity_changed=polarity_changed,.hw_invert=hw_invert,.frame_color=frame_color,.frame_night=frame_night};
     return true;
 }

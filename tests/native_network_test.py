@@ -10,9 +10,11 @@ source = (root / 'scripts/power.sh').read_text()
 with tempfile.TemporaryDirectory(prefix='reeden-native-network-') as tmp:
     app = Path(tmp)
     for directory in ('state', 'logs', 'sys/power', 'sys/class/rtc/rtc0',
-                      'proc', 'dev', 'etc', 'stubs'):
+                      'proc', 'dev', 'etc', 'stubs', 'tmp', 'sys/class/net/wlan0', 'mnt/onboard/.kobo'):
         (app / directory).mkdir(parents=True, exist_ok=True)
-    (app / 'session.sh').write_text(f'APP="{app}"\nSTATE="$APP/state"\n')
+    (app / 'session.sh').write_text(f'APP="{app}"\nSTATE="$APP/state"\ntoken() {{ echo 1; }}\n')
+    (app / 'mnt/onboard/.kobo/version').write_text('SN,FW,000-393\n')
+    (app / 'sys/class/net/wlan0/flags').write_text('0x1203\n')
     (app / 'sys/power/state-extended').write_text('1\n')
     (app / 'sys/power/state').write_text('untouched\n')
     (app / 'sys/class/rtc/rtc0/wakealarm').write_text('1234\n')
@@ -25,6 +27,13 @@ with tempfile.TemporaryDirectory(prefix='reeden-native-network-') as tmp:
     source = source.replace(
         'export PATH=/usr/local/Kobo:/usr/sbin:/usr/bin:/sbin:/bin',
         f'export PATH="{app}/stubs:/usr/bin:/bin"')
+    wifi = (root / 'scripts/wifi.sh').read_text()
+    for prefix in ('/sys/', '/proc/', '/dev/', '/etc/', '/tmp/', '/mnt/onboard/'):
+        wifi = wifi.replace(prefix, str(app) + prefix)
+    wifi = wifi.replace('export PATH=/usr/local/Kobo:/usr/sbin:/usr/bin:/sbin:/bin',
+                        f'export PATH="{app}/stubs:/usr/bin:/bin"')
+    (app / 'wifi.sh').write_text(wifi)
+    (app / 'wifi.sh').chmod(0o755)
     stub = '''#!/bin/sh
 name=${0##*/}
 echo "$name $*" >> "$APP/commands"
@@ -52,7 +61,7 @@ esac
         assert not (app / 'state' / name).exists(), name
     commands = (app / 'commands').read_text().splitlines()
     assert 'dhcpcd -d -k wlan0' in commands
-    assert 'wpa_cli -i wlan0 terminate' in commands
+    assert 'wpa_cli -p /var/run/wpa_supplicant -i wlan0 terminate' in commands
     assert 'ifconfig wlan0 down' in commands
     assert not any('wlan0 up' in line or ' -z ' in line for line in commands)
     assert 'radio and network services restarted' not in (app / 'logs/power.log').read_text()

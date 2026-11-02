@@ -17,6 +17,13 @@ bool light_panel_compose(uint8_t *p,size_t s,unsigned w,unsigned h){(void)p;(voi
 static FILE *command_file;
 static bool inverted,in_flight,fail_inversion;
 static unsigned submitted,completed,last_wave,last_flags,commands;
+static unsigned outstanding,band_count,fail_band_at,submission_waits;
+static bool pending_markers[1024],needs_submission_wait;
+static unsigned band_left[128];
+static unsigned band_top[128];
+static bool expect_parts;
+static unsigned part_color_rows,part_gray_rows;
+static uint64_t last_band_submit;
 static uint32_t last_first_pixel;
 static Display *display;
 static FILE *__real_fopen(const char *path,const char *mode){return fopen(path,mode);}
@@ -42,13 +49,35 @@ struct update_record {uint32_t top,left,width,height,waveform,mode,marker,flags;
 int __wrap_ioctl(int fd,unsigned long request,...){
     assert(fd==99);va_list args;va_start(args,request);void *p=va_arg(args,void *);va_end(args);
     if(request==0x4024462eUL){
-        struct update_record *u=p;assert(!in_flight&&u->mode==1&&u->dither==0);
-        assert(u->left%16==0&&u->top%16==0&&u->left+u->width<=64&&u->top+u->height<=64);
+        struct update_record *u=p;assert(u->dither==0&&!needs_submission_wait);
+        assert(u->left%16==0&&u->top%16==0&&u->left+u->width<=display->v.xres&&u->top+u->height<=display->v.yres);
+        if(u->mode==0){
+            uint64_t now=monotonic_ns();
+            uint64_t minimum=display->page_turn_steps<=16?4000000ULL:display->page_turn_steps<=24?6000000ULL:8000000ULL;
+            if(outstanding)assert(now-last_band_submit>=minimum);
+            last_band_submit=now;
+            band_count++;assert(u->flags==0x8000);
+            assert(u->waveform==REFRESH_GCK16||u->waveform==REFRESH_GLKW16);
+            if(band_count==fail_band_at){fail_band_at=0;errno=EIO;return -1;}
+            band_left[band_count%128]=u->left;band_top[band_count%128]=u->top;needs_submission_wait=true;
+        }else if(expect_parts&&u->height<display->v.yres){
+            assert(u->mode==1&&u->left==0&&u->width==display->v.xres&&u->top%48==0);
+            if(u->flags==REFRESH_CFA_G2){assert(u->waveform==REFRESH_GLRC16);part_color_rows+=u->height;}
+            else {assert(u->flags==0&&u->waveform==REFRESH_GLKW16);part_gray_rows+=u->height;}
+            needs_submission_wait=true;
+        }else assert(u->mode==1&&!outstanding);
+        assert(u->marker<1024&&!pending_markers[u->marker]);
+        pending_markers[u->marker]=true;outstanding++;
         submitted=u->marker;last_wave=u->waveform;last_flags=u->flags;
         last_first_pixel=((uint32_t*)display->mem)[0];in_flight=true;
+    }else if(request==0x40044637UL){
+        assert(*(uint32_t*)p==submitted&&needs_submission_wait);
+        needs_submission_wait=false;submission_waits++;
     }else{
-        assert(request==0xc008462fUL);assert(*(uint32_t*)p==submitted&&in_flight);
-        completed=submitted;in_flight=false;
+        assert(request==0xc008462fUL);unsigned marker=*(uint32_t*)p;
+        assert(marker<1024&&pending_markers[marker]&&outstanding);
+        pending_markers[marker]=false;outstanding--;
+        completed=marker;in_flight=outstanding>0;
     }
     return 0;
 }
@@ -60,6 +89,106 @@ int __wrap_ioctl(int fd,unsigned long request,...){
 #undef fopen
 #undef fclose
 static void flush_now(Display *d){d->last_refresh=d->last_present=d->first_dirty=0;display_flush(d);assert(!in_flight&&completed==submitted);}
+static void check_page_turns(Display *original){
+    Display d={.fd=99,.pending_stride=640*4,.length=640*64*4};display=&d;
+    d.v.xres=640;d.v.yres=64;d.f.line_length=d.pending_stride;
+    d.v.red=(struct fb_bitfield){0,8,0};d.v.green=(struct fb_bitfield){8,8,0};
+    d.v.blue=(struct fb_bitfield){16,8,0};d.v.transp=(struct fb_bitfield){24,8,0};
+    d.pending=malloc(d.length);d.committed=malloc(d.length);d.mem=calloc(1,d.length);
+    assert(d.pending&&d.committed&&d.mem);pthread_mutex_init(&d.lock,NULL);strcpy(d.mode,"balanced");
+    memset(d.pending,255,d.length);d.frames=1;d.dirty=d.full=true;flush_now(&d);
+    assert(!d.animated_refreshes);
+    assert(display_arm_page_turn(&d,true,false,10));
+    for(unsigned y=8;y<56;y++)for(unsigned x=16;x<d.v.xres-16;x++){
+        uint8_t *p=d.pending+y*d.pending_stride+x*4;p[0]=p[1]=p[2]=200;
+    }
+    d.dirty=true;unsigned at=band_count;flush_now(&d);
+    assert(d.animated_refreshes==1&&band_count==at+10&&submission_waits>=10);
+    for(unsigned i=1;i<10;i++)assert(band_left[(at+i)%128]>band_left[(at+i+1)%128]);
+    assert(!memcmp(d.pending,d.committed,d.length));
+    assert(display_arm_page_turn(&d,false,false,10));memset(d.pending,255,d.length);d.dirty=true;at=band_count;flush_now(&d);
+    assert(d.animated_refreshes==2&&band_count==at+10);
+    for(unsigned i=1;i<10;i++)assert(band_left[(at+i)%128]<band_left[(at+i+1)%128]);
+    /* A failed third band still displays the complete new page, after all
+     * accepted band markers finish. No half-page or unsubmitted marker wait. */
+    assert(display_arm_page_turn(&d,true,false,10));memset(d.pending,200,d.length);d.dirty=true;
+    fail_band_at=band_count+3;flush_now(&d);assert(d.animated_refreshes==2&&last_wave==REFRESH_GLR16);
+    assert(!memcmp(d.pending,d.committed,d.length));
+    assert(display_arm_page_turn(&d,true,false,10));display_full(&d);at=band_count;flush_now(&d);
+    assert(band_count==at&&last_wave==REFRESH_GC16);
+    assert(display_arm_page_turn(&d,true,true,2));memset(d.pending,150,d.length);d.dirty=true;
+    at=band_count;flush_now(&d);assert(d.animated_refreshes==3&&band_count==at+2);
+    assert(band_top[(at+1)%128]>band_top[(at+2)%128]);
+    /* Actual color, even unchanged outside the dirty box, must never be sent
+     * through grayscale strips. */
+    d.pending[0]=250;d.pending[1]=20;d.pending[2]=30;d.dirty=true;flush_now(&d);
+    assert(display_arm_page_turn(&d,true,false,10));
+    for(unsigned y=8;y<56;y++)for(unsigned x=16;x<d.v.xres-16;x++){
+        uint8_t *p=d.pending+y*d.pending_stride+x*4;p[0]=p[1]=p[2]=150;
+    }
+    d.dirty=true;at=band_count;flush_now(&d);assert(band_count==at);
+    /* An old arm cannot animate an unrelated later page/menu. */
+    memset(d.pending,255,d.length);d.dirty=true;flush_now(&d);
+    assert(display_arm_page_turn(&d,true,false,10));d.page_turn_until=0;memset(d.pending,200,d.length);d.dirty=true;
+    at=band_count;flush_now(&d);assert(band_count==at);
+    memset(d.pending,0,d.length);display_full(&d);flush_now(&d);
+    assert(display_arm_page_turn(&d,true,false,10));
+    for(unsigned y=8;y<56;y++)for(unsigned x=16;x<d.v.xres-16;x++){
+        uint8_t *p=d.pending+y*d.pending_stride+x*4;p[0]=p[1]=p[2]=80;
+    }
+    d.dirty=true;flush_now(&d);assert(d.animated_refreshes==4&&last_wave==REFRESH_GLKW16&&inverted);
+    /* The original fast setting uses fewer paced bands while preserving
+     * the same complete final image and completion fences. */
+    assert(display_arm_page_turn(&d,true,false,6));
+    memset(d.pending,60,d.length);d.dirty=true;at=band_count;flush_now(&d);
+    assert(d.animated_refreshes==5&&band_count==at+6&&last_wave==REFRESH_GLKW16);
+    assert(!memcmp(d.pending,d.committed,d.length));
+    /* Fine bands cover the final image in either direction and retain all
+     * completion barriers with the larger hardware transaction sequence. */
+    for(unsigned steps=16;steps<=REFRESH_BANDS_MAX;steps+=8){
+        assert(display_arm_page_turn(&d,false,false,steps));
+        memset(d.pending,steps,d.length);d.dirty=true;
+        at=band_count;unsigned before=d.animated_refreshes;flush_now(&d);
+        assert(d.animated_refreshes==before+1&&band_count==at+steps);
+        for(unsigned i=1;i<steps;i++)assert(band_left[(at+i)%128]<band_left[(at+i+1)%128]);
+        assert(!memcmp(d.pending,d.committed,d.length));
+    }
+    assert(!display_inversion(&d,false));
+    free(d.pending);free(d.committed);free(d.mem);pthread_mutex_destroy(&d.lock);display=original;
+}
+static void check_localized_color(Display *original){
+    Display d={.fd=99,.pending_stride=192*4,.length=192*768*4};display=&d;
+    d.v.xres=192;d.v.yres=768;d.f.line_length=d.pending_stride;
+    d.v.red=(struct fb_bitfield){0,8,0};d.v.green=(struct fb_bitfield){8,8,0};
+    d.v.blue=(struct fb_bitfield){16,8,0};d.v.transp=(struct fb_bitfield){24,8,0};
+    d.pending=calloc(1,d.length);d.committed=malloc(d.length);d.mem=calloc(1,d.length);
+    assert(d.pending&&d.committed&&d.mem);pthread_mutex_init(&d.lock,NULL);strcpy(d.mode,"balanced");
+    d.frames=1;d.dirty=d.full=true;flush_now(&d);assert(inverted);
+    for(unsigned y=8;y<760;y+=8)for(unsigned x=16;x<176;x++){
+        uint8_t *p=d.pending+y*d.pending_stride+x*4;p[0]=p[1]=p[2]=80;
+    }
+    d.pending[300*d.pending_stride+20*4]=200;
+    d.dirty=true;expect_parts=true;part_color_rows=part_gray_rows=0;flush_now(&d);
+    assert(d.localized_color_refreshes==1&&d.clean_refreshes==1&&d.direct_night&&!inverted);
+    assert(part_color_rows==144&&part_gray_rows==624);
+    assert(!memcmp(d.pending,d.committed,d.length));
+    d.pending[300*d.pending_stride+20*4]=0;
+    for(unsigned y=8;y<760;y+=8)for(unsigned x=16;x<176;x++){
+        uint8_t *p=d.pending+y*d.pending_stride+x*4;p[0]=p[1]=p[2]=90;
+    }
+    d.dirty=true;part_color_rows=part_gray_rows=0;flush_now(&d);
+    assert(d.localized_color_refreshes==2&&part_color_rows==144&&!inverted);
+    assert(d.direct_night&&d.clean_refreshes==1&&!memcmp(d.pending,d.committed,d.length));
+    expect_parts=false;
+    /* A real image takes the normal CFA path; explicit full clean is honored. */
+    for(unsigned y=0;y<768;y++)for(unsigned x=0;x<192;x++){
+        uint8_t *p=d.pending+y*d.pending_stride+x*4;p[0]=200;p[1]=p[2]=0;
+    }
+    d.dirty=true;flush_now(&d);assert(d.localized_color_refreshes==2&&last_wave==REFRESH_GLRC16);
+    display_full(&d);flush_now(&d);assert(last_wave==REFRESH_GCC16&&d.clean_refreshes==2);
+    assert(!display_inversion(&d,false));
+    free(d.pending);free(d.committed);free(d.mem);pthread_mutex_destroy(&d.lock);display=original;
+}
 int main(void){
     char root[]="/tmp/reeden-display-test-XXXXXX";assert(mkdtemp(root));char path[512];
     snprintf(path,sizeof(path),"%s/state",root);assert(!mkdir(path,0700));assert(!setenv("REEDEN_KOBO_DIR",root,1));
@@ -77,15 +206,19 @@ int main(void){
     d.pending[32*256+32*4]=d.pending[32*256+32*4+1]=d.pending[32*256+32*4+2]=255;
     d.dirty=true;flush_now(&d);assert(last_wave==REFRESH_GLKW16&&last_flags==0&&inverted);
     /* A single colored glyph requires CFA and a safe global encoding switch. */
+    unsigned cleans=d.clean_refreshes;
     d.pending[0]=200;d.dirty=true;flush_now(&d);
-    assert(last_wave==REFRESH_GCC16&&last_flags==REFRESH_CFA_G2&&!inverted&&last_first_pixel==0xffc80000);
+    assert(last_wave==REFRESH_GLRC16&&last_flags==REFRESH_CFA_G2&&!inverted&&last_first_pixel==0xffc80000);
+    assert(d.clean_refreshes==cleans); /* Encoding changes are not clean requests. */
     d.pending[4]=180;d.dirty=true;flush_now(&d);
     assert(last_wave==REFRESH_GLRC16&&last_flags==REFRESH_CFA_G2&&!inverted);
-    /* Erasing old color still uses CFA, then gray returns to Eclipse. */
+    /* Erasing old color still uses CFA; subsequent gray pages retain the
+     * session's direct encoding instead of toggling the global flag again. */
     d.pending[0]=d.pending[4]=0;d.dirty=true;flush_now(&d);
-    assert(last_wave==REFRESH_GCC16&&last_flags==REFRESH_CFA_G2&&inverted);
+    assert(last_wave==REFRESH_GLRC16&&last_flags==REFRESH_CFA_G2&&!inverted);
+    assert(d.clean_refreshes==cleans);
     d.pending[32*256+32*4]=d.pending[32*256+32*4+1]=d.pending[32*256+32*4+2]=0;
-    d.dirty=true;flush_now(&d);assert(last_wave==REFRESH_GLKW16&&last_flags==0&&inverted);
+    d.dirty=true;flush_now(&d);assert(last_wave==REFRESH_GLKW16&&last_flags==0&&!inverted);
     snprintf(path,sizeof(path),"%s/cover.y8",root);FILE *cover=fopen(path,"wb");assert(cover);
     uint8_t white[4096];memset(white,255,sizeof(white));assert(fwrite(white,1,sizeof(white),cover)==sizeof(white));fclose(cover);
     assert(!display_cover(&d,path,64,64,1));assert(!inverted&&last_wave==REFRESH_GC16);
@@ -102,8 +235,10 @@ int main(void){
     assert(fwrite(rgba_cover,1,sizeof(rgba_cover),cover)==sizeof(rgba_cover));fclose(cover);
     assert(!display_cover(&d,path,64,64,4));assert(d.committed[0]==30&&d.committed[1]==40&&d.committed[2]==220);
     unlink(path);snprintf(path,sizeof(path),"%s/state/night-invert",root);assert(access(path,F_OK)<0);
+    check_page_turns(&d);
+    check_localized_color(&d);
     /* A failed global write must retain its recovery obligation and abort. */
-    fail_inversion=true;display_full(&d);flush_now(&d);assert(app_quit&&access(path,F_OK)==0);
+    fail_inversion=true;d.direct_night=false;display_full(&d);flush_now(&d);assert(app_quit&&access(path,F_OK)==0);
     unlink(path);snprintf(path,sizeof(path),"%s/state",root);rmdir(path);rmdir(root);
     free(d.pending);free(d.committed);free(d.mem);pthread_mutex_destroy(&d.lock);
     assert(commands>0);

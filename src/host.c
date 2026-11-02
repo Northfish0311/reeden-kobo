@@ -176,10 +176,22 @@ static void eink_channel(const FlutterPlatformMessage *m,const char *method,Read
         Value mode={0};bool found=read_argument(args,"mode",&mode);if(!found)found=read_argument(args,NULL,&mode);
         if(found&&mode.type==7&&(!strcmp(mode.string,"balanced")||!strcmp(mode.string,"hd")||!strcmp(mode.string,"regal")||!strcmp(mode.string,"fast"))){pthread_mutex_lock(&screen.lock);snprintf(screen.mode,sizeof(screen.mode),"%s",mode.string);pthread_mutex_unlock(&screen.lock);fprintf(stderr,"[refresh-mode] %s\n",mode.string);w_bool(&w,1);}else w_bool(&w,0);
     }else if(!strcmp(method,"capabilities")){
-        w_map(&w,7);w_string(&w,"platform");w_string(&w,"kindle");w_string(&w,"driver");w_string(&w,"kobo-hwtcon");w_string(&w,"fullRefresh");w_bool(&w,1);w_string(&w,"supported");w_bool(&w,1);w_string(&w,"modes");w_list(&w,4);w_string(&w,"hd");w_string(&w,"regal");w_string(&w,"balanced");w_string(&w,"fast");w_string(&w,"armPageTurn");w_bool(&w,0);w_string(&w,"color");w_bool(&w,1);
+        w_map(&w,7);w_string(&w,"platform");w_string(&w,"kindle");w_string(&w,"driver");w_string(&w,"kobo-hwtcon");w_string(&w,"fullRefresh");w_bool(&w,1);w_string(&w,"supported");w_bool(&w,1);w_string(&w,"modes");w_list(&w,4);w_string(&w,"hd");w_string(&w,"regal");w_string(&w,"balanced");w_string(&w,"fast");w_string(&w,"armPageTurn");w_bool(&w,1);w_string(&w,"color");w_bool(&w,1);
     }else if(!strcmp(method,"diagnostics")){
         w_map(&w,5);w_string(&w,"driver");w_string(&w,"kobo-hwtcon");w_string(&w,"mode");w_string(&w,screen.mode);w_string(&w,"width");w_int(&w,screen.v.xres);w_string(&w,"height");w_int(&w,screen.v.yres);w_string(&w,"refreshes");w_int(&w,screen.refreshes);
-    }else if(!strcmp(method,"armPageTurn"))w_bool(&w,0);
+    }else if(!strcmp(method,"armPageTurn")){
+        /* The official Kindle runner exposes this through ireader_epdc.
+         * Match its three argument keys and default forward direction. */
+        Value direction={0};
+        bool forward=!read_argument(args,"forward",&direction)||direction.type!=2;
+        Value vertical={0},speed={0};
+        bool is_vertical=read_argument(args,"vertical",&vertical)&&vertical.type==1;
+        unsigned steps=24;
+        if(read_argument(args,"speedBits",&speed)&&(speed.type==3||speed.type==4))steps=speed.integer<=63?16:speed.integer<=127?24:32;
+        bool armed=display_arm_page_turn(&screen,forward,is_vertical,steps);
+        fprintf(stderr,"[page-turn] arm type=%d forward=%u vertical=%u steps=%u accepted=%u\n",direction.type,forward,is_vertical,steps,armed);
+        w_bool(&w,armed);
+    }
     else {empty_reply(m);return;}
     respond(m,w.data,w.error?0:w.n);
 }
@@ -206,7 +218,9 @@ static void platform_message(const FlutterPlatformMessage *m,void *u){
         fprintf(stderr,"[channel] %s\n",m->channel);}
     Reader r={m->message,m->message_size,0,0};char method[160]={0};
     if(!read_method(&r,method,sizeof(method))){empty_reply(m);return;}
-    if(!strcmp(m->channel,"app.reeden.eink_epd")){eink_channel(m,method,r);return;}
+    /* Kindle's existing ripple UI queries ireader_epdc, despite the name.
+     * Advertising support only on eink_epd leaves that UI hidden. */
+    if(!strcmp(m->channel,"app.reeden.eink_epd")||!strcmp(m->channel,"app.reeden.ireader_epdc")){eink_channel(m,method,r);return;}
     if(!strcmp(m->channel,"app.reeden.kobo")){kobo_channel(m,method,r);return;}
     if(!strcmp(m->channel,"app.reeden.eink_sleep_cover")){sleep_cover_channel(m,method,r);return;}
     if(!strcmp(m->channel,"app.reeden.kindle_screen")){
@@ -215,9 +229,6 @@ static void platform_message(const FlutterPlatformMessage *m,void *u){
         else if(!strcmp(method,"setLandscape"))w_bool(&w,0);
         else {empty_reply(m);return;}
         respond(m,w.data,w.n);return;
-    }
-    if(!strcmp(m->channel,"app.reeden.ireader_epdc")){
-        Writer w={0};w_byte(&w,0);if(!strcmp(method,"isSupported"))w_bool(&w,0);else {empty_reply(m);return;}respond(m,w.data,w.n);return;
     }
     if(!strcmp(m->channel,"flutter/keyboard")){
         /* Keyboard uses StandardMethodCodec: success byte, then key map. */
@@ -408,7 +419,7 @@ int main(int argc,char **argv){
             }
         }}
     }
-    fprintf(stderr,"[host] exiting frames=%u updates=%u clean=%u gray=%u color=%u night=%u\n",screen.frames,screen.refreshes,screen.clean_refreshes,screen.gray_refreshes,screen.color_refreshes,screen.night_refreshes);
+    fprintf(stderr,"[host] exiting frames=%u updates=%u clean=%u gray=%u color=%u night=%u animated=%u\n",screen.frames,screen.refreshes,screen.clean_refreshes,screen.gray_refreshes,screen.color_refreshes,screen.night_refreshes,screen.animated_refreshes);
     state_file("power-cancel",true);
     if(power_worker>0)power_worker_stop(power_worker);
     if(power>=0)close(power);touch_close(&touch,engine);FlutterEngineShutdown(engine);engine=NULL;FlutterEngineCollectAOTData(aot);display_close(&screen);free(clipboard);

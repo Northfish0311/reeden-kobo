@@ -45,7 +45,7 @@ for src in (base/'usr/share/doc').glob('*/copyright'):copy(src,P/'licenses/debia
 certificates=sorted((base/'usr/share/ca-certificates/mozilla').glob('*.crt'))
 assert len(certificates)>100,'CA package missing'
 (P/'certs/ca-certificates.crt').write_bytes(b'\n'.join(x.read_bytes() for x in certificates))
-for name in ['run.sh','session.sh','recover.sh','guardian.sh','native-session.sh','power.sh','precheck.sh','reeden-ssh.sh','uninstall.sh','install.sh','verify.sh']:
+for name in ['run.sh','session.sh','recover.sh','guardian.sh','native-session.sh','power.sh','wifi.sh','precheck.sh','reeden-ssh.sh','uninstall.sh','install.sh','verify.sh']:
     copy(ROOT/'scripts'/name,P/name);(P/name).chmod(0o755)
 for name in ['lipc-get-prop','lipc-set-prop']:
     copy(ROOT/'scripts'/name,P/'bin'/name);(P/'bin'/name).chmod(0o755)
