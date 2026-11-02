@@ -28,7 +28,7 @@ fi
 # build machine's checkout directory, Zig installation path or username.
 # This is required both for privacy and for byte-identical reproduction on CI.
 "$ZIG" cc -target arm-linux-gnueabihf.2.28 -mcpu=cortex_a7 -fPIC -pie -O2 -Wall -Wextra -Werror -Wno-unused-parameter -Iinclude -Isrc -Ivendor \
-    src/host.c src/power_worker.c src/display.c src/refresh_policy.c src/turn_timing.c src/light_panel.c src/input.c src/codec.c vendor/cJSON.c \
+    src/host.c src/power_worker.c src/display.c src/refresh_policy.c src/turn_timing.c src/frame_evidence.c src/light_panel.c src/input.c src/codec.c vendor/cJSON.c \
     -L"$ENGINE_LIB_DIR" -lflutter_engine -lpthread -ldl -lm -Wl,-rpath,'$ORIGIN/../core/lib:$ORIGIN/../lib' \
     -Wl,--strip-all -o "$ROOT/package/bin/reeden-kindle"
 "$ZIG" cc -target arm-linux-gnueabihf.2.17 -mcpu=cortex_a7 -O2 -Wall -Wextra -Werror -shared -fPIC \
@@ -44,7 +44,7 @@ echo "Built Kobo host, path/child-runtime compatibility library and framebuffer 
 "$ZIG" cc -target arm-linux-gnueabihf.2.28 -mcpu=cortex_a7 -fPIC -pie -O2 -Wall -Wextra -Werror -Iinclude tests/runtime_test.c -L"$ENGINE_LIB_DIR" -lflutter_engine -Wl,--strip-all -o "$ROOT/build/runtime-test-armhf"
 "$ZIG" cc -target arm-linux-musleabihf -static -mcpu=cortex_a7 -O2 -Wall -Wextra -Werror -Isrc tests/refresh_policy_test.c src/refresh_policy.c -Wl,--strip-all -o "$ROOT/build/refresh-policy-test-armhf"
 "$ZIG" cc -target arm-linux-musleabihf -static -mcpu=cortex_a7 -O2 -Wall -Wextra -Werror -Isrc tests/power_worker_test.c src/power_worker.c -lpthread -Wl,--strip-all -o "$ROOT/build/power-worker-test-armhf"
-"$ZIG" cc -target arm-linux-musleabihf -static -mcpu=cortex_a7 -O2 -Wall -Wextra -Werror -Iinclude -Isrc tests/display_transaction_test.c src/refresh_policy.c src/turn_timing.c -lpthread -Wl,--strip-all -o "$ROOT/build/display-transaction-test-armhf"
+"$ZIG" cc -target arm-linux-musleabihf -static -mcpu=cortex_a7 -O2 -Wall -Wextra -Werror -Iinclude -Isrc tests/display_transaction_test.c src/refresh_policy.c src/turn_timing.c src/frame_evidence.c -lpthread -Wl,--strip-all -o "$ROOT/build/display-transaction-test-armhf"
 
 # Guard: refuse to ship any binary that still embeds an absolute build path.
 # (Runtime paths such as /tmp/reeden-kobo-*.heartbeat are intentional and

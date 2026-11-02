@@ -16,6 +16,12 @@ enum { REFRESH_GC16=2, REFRESH_GLR16=4, REFRESH_GCK16=8,
        REFRESH_GLKW16=9, REFRESH_GCC16=10, REFRESH_GLRC16=11,
        REFRESH_CFA_G2=0x600 };
 
+/* Raw IDs, NOT libkobo names. Despite NickelDissolve ABOUT.md calling raw 8
+ * daytime glkw16, this Clara Colour's live waveform_modes maps 8 -> gck16
+ * and 9 -> glkw16; Kobo's published HWTCON source agrees. Use neutral band
+ * aliases to preserve baseline behavior without assuming pulse semantics. */
+enum { HWTCON_RAW_DAY_BAND=8, HWTCON_RAW_NIGHT_BAND=9 };
+
 /* The old image is a RAM copy of the last successfully submitted BGRA frame.
  * A NULL old image forces initialization. Alpha changes alone are invisible. */
 bool refresh_plan(const uint8_t *old,const uint8_t *next,size_t stride,

@@ -6,6 +6,7 @@
 #include <linux/fb.h>
 #include "embedder.h"
 #include "turn_timing.h"
+#include "frame_evidence.h"
 #include <stdatomic.h>
 typedef struct {
     int fd; uint8_t *mem; size_t length; struct fb_var_screeninfo v; struct fb_fix_screeninfo f;
@@ -19,6 +20,8 @@ typedef struct {
     unsigned animated_refreshes;
     bool direct_night; unsigned localized_color_refreshes;
     TurnOptions turn_options;
+    FrameEvidenceOptions evidence_options;
+    unsigned quality_refreshes;
     atomic_bool turn_cancel;
     uint64_t trace_serial,last_input_ns,turn_input_ns,turn_arm_ns,turn_first_frame_ns,turn_last_frame_ns;
 } Display;
