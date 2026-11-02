@@ -139,7 +139,8 @@ def analyze(capture, output):
               'conversion': conversion_check(files['target.bgra'], files['fb-before.bin'], files['fb-converted.bin'], info),
               'framebuffer_unchanged_through_completion': files['fb-converted.bin'] == files['fb-complete.bin'],
               'target_background_gray': bg, 'old_only_ink_candidate_pixels': count,
-              'target_alpha_histogram': dict(collections.Counter(files['target.bgra'][3:][::4])),
+              'target_alpha_histogram': dict(collections.Counter(
+                  files['target.bgra'][y*info['logical_stride']+x*4+3] for y in range(h) for x in range(w))),
               'hashes': {name: hashlib.sha256(raw).hexdigest() for name, raw in files.items()},
               'limitations': ['Normal antialiasing is gray; faint pixels alone are not a rendering bug.',
                               'Need aligned physical photo and previous-page comparison to classify the shadow.',

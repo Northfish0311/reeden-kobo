@@ -42,6 +42,7 @@ class PixelEvidenceTest(unittest.TestCase):
                 self.assertTrue(report['conversion']['exact_expected_conversion'])
                 self.assertTrue(report['framebuffer_unchanged_through_completion'])
                 self.assertGreater(report['old_only_ink_candidate_pixels'],0)
+                self.assertEqual(sum(report['target_alpha_histogram'].values()),16)  # Exclude row padding.
                 self.assertFalse(report['physical_shadow_proven'])
 
     def test_conversion_corruption(self):
