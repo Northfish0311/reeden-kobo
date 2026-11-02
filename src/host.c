@@ -24,6 +24,9 @@
 volatile int app_quit;
 static FlutterEngine engine;
 static Display screen;
+#ifndef REEDEN_HEADLESS_DIAGNOSTIC
+static void observe_input(uint64_t at){display_note_input(&screen,at);}
+#endif
 static int wake_pipe[2]={-1,-1};
 static pthread_t platform_thread;
 static pthread_mutex_t task_lock=PTHREAD_MUTEX_INITIALIZER;
@@ -293,6 +296,7 @@ int main(int argc,char **argv){
     memset(&touch,0,sizeof(touch));touch.fd=-1;
 #else
     if(display_open(&screen)){perror("display_open");display_close(&screen);return 2;}
+    if(screen.turn_options.trace)touch_set_observer(observe_input);
     memset(&touch,0,sizeof(touch));touch.fd=-1;
     light_panel_init(root,(LightPanelOps){.read_number=read_number,.write_number=write_number,.invalidate=light_panel_changed,.userdata=&screen});
     touch_set_filter(light_panel_pointer);

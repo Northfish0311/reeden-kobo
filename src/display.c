@@ -17,6 +17,24 @@ struct update { struct rect region; uint32_t waveform,mode,marker,flags; int dit
 #define WAIT_COMPLETE 0xc008462fUL
 #define WAIT_SUBMISSION 0x40044637UL
 _Static_assert(sizeof(struct update)==36,"HWTCON update ABI");
+static int send_update(Display *d,struct update *u,TurnTrace *trace){
+    uint64_t start=trace?monotonic_ns():0;
+    int result=ioctl(d->fd,SEND_UPDATE,u),error=result<0?errno:0;
+    if(result>=0)d->last_accepted_marker=u->marker;
+    turn_trace_add(trace,"send",start,trace?monotonic_ns():0,
+        (RefreshRegion){u->region.left,u->region.top,u->region.width,u->region.height},
+        u->marker,u->waveform,u->mode,u->flags,result,error);
+    if(result<0)errno=error;return result;
+}
+static int wait_marker(Display *d,const struct update *u,bool complete,TurnTrace *trace){
+    uint32_t marker[2]={u->marker,0};uint64_t start=trace?monotonic_ns():0;
+    int result=ioctl(d->fd,complete?WAIT_COMPLETE:WAIT_SUBMISSION,marker),error=result<0?errno:0;
+    turn_trace_add(trace,complete?"wait_complete":"wait_submission",start,trace?monotonic_ns():0,
+        (RefreshRegion){u->region.left,u->region.top,u->region.width,u->region.height},
+        u->marker,u->waveform,u->mode,u->flags,result,error);
+    if(result<0)errno=error;return result;
+}
+static int display_wait_traced(Display *,TurnTrace *);
 uint64_t monotonic_ns(void){struct timespec t;clock_gettime(CLOCK_MONOTONIC,&t);return (uint64_t)t.tv_sec*1000000000+t.tv_nsec;}
 int read_number(const char *p,int fallback){FILE *f=fopen(p,"r");int n=fallback;if(f){if(fscanf(f,"%d",&n)!=1)n=fallback;fclose(f);}return n;}
 int write_number(const char *p,int n){FILE *f=fopen(p,"w");if(!f)return -1;int a=fprintf(f,"%d\n",n);int b=fclose(f);return a>0&&b==0?0:-1;}
@@ -39,6 +57,8 @@ static int display_inversion(Display *d,bool inverted){
 }
 int display_open(Display *d){
     memset(d,0,sizeof(*d));d->fd=-1;pthread_mutex_init(&d->lock,NULL);strcpy(d->mode,"balanced");
+    atomic_init(&d->turn_cancel,false);
+    if(!turn_options_load(&d->turn_options))fprintf(stderr,"[page-turn] invalid experiment configuration; stable profile retained\n");
     const char *p=getenv("REEDEN_FB");if(!p)p="/dev/fb0";
     d->fd=open(p,O_RDONLY|O_CLOEXEC);if(d->fd<0)return -1;
     if(ioctl(d->fd,FBIOGET_VSCREENINFO,&d->v)||ioctl(d->fd,FBIOGET_FSCREENINFO,&d->f))return -1;
@@ -64,6 +84,7 @@ int display_acquire(Display *d){
 }
 bool display_present(Display *d,const void *pixels,size_t row,size_t height){
     if(!pixels||height!=d->v.yres||row<d->pending_stride){fprintf(stderr,"[display] rejected surface: row=%zu height=%zu\n",row,height);return false;}
+    uint64_t arrived=d->turn_options.trace?monotonic_ns():0;
     pthread_mutex_lock(&d->lock);
     bool changed=!d->frames;
     for(unsigned y=0;y<height;y++){
@@ -72,7 +93,8 @@ bool display_present(Display *d,const void *pixels,size_t row,size_t height){
         if(!d->frames||memcmp(dst,src,d->pending_stride)){memcpy(dst,src,d->pending_stride);changed=true;}
     }
     if(d->use_light_overlay&&light_panel_compose(d->pending,d->pending_stride,d->v.xres,d->v.yres))changed=true;
-    if(changed){uint64_t now=monotonic_ns();if(!d->dirty)d->first_dirty=now;d->dirty=true;d->last_present=now;}
+    if(changed){uint64_t now=monotonic_ns();if(!d->dirty)d->first_dirty=now;d->dirty=true;d->last_present=now;
+        if(d->turn_options.trace&&d->page_turn_direction){if(!d->turn_first_frame_ns)d->turn_first_frame_ns=arrived;d->turn_last_frame_ns=arrived;}}
     d->frames++;
     if(d->frames==1){d->full=true;fprintf(stderr,"[display] FIRST_FRAME_RECEIVED\n");}
     pthread_mutex_unlock(&d->lock);return true;
@@ -88,59 +110,74 @@ void display_request_full(Display *d,unsigned delay_ms){
 bool display_arm_page_turn(Display *d,bool forward,bool vertical,unsigned steps){
     pthread_mutex_lock(&d->lock);
     bool ready=d->mem&&d->committed_valid&&steps>=2&&steps<=REFRESH_BANDS_MAX;
-    if(ready){d->page_turn_direction=forward?1:-1;d->page_turn_vertical=vertical;d->page_turn_steps=steps;d->page_turn_until=monotonic_ns()+2500000000ULL;}
+    if(ready){d->page_turn_direction=forward?1:-1;d->page_turn_vertical=vertical;d->page_turn_steps=steps;d->page_turn_until=monotonic_ns()+2500000000ULL;
+        atomic_store(&d->turn_cancel,false);
+        if(d->turn_options.trace){d->turn_input_ns=d->last_input_ns;d->turn_arm_ns=monotonic_ns();d->turn_first_frame_ns=d->turn_last_frame_ns=0;}}
     pthread_mutex_unlock(&d->lock);return ready;
+}
+void display_cancel_page_turn(Display *d){atomic_store(&d->turn_cancel,true);}
+void display_note_input(Display *d,uint64_t at){
+    pthread_mutex_lock(&d->lock);d->last_input_ns=at;pthread_mutex_unlock(&d->lock);
 }
 static unsigned next_marker(Display *d){if(++d->marker==0)++d->marker;return d->marker;}
 /* Every region reads the same immutable final framebuffer. Fence all accepted
  * markers before another framebuffer/global inversion change, including on
  * a partial failure. Never wait on a marker rejected by SEND_UPDATE. */
-static int submit_sequence(Display *d,struct update *updates,unsigned n,struct update *last,uint64_t gap_ns){
-    uint32_t markers[REFRESH_BANDS_MAX];unsigned count=0;bool failed=false;
+static int submit_sequence(Display *d,struct update *updates,unsigned n,struct update *last,uint64_t gap_ns,
+                           const unsigned *positions,unsigned span_pixels,TurnTrace *trace){
+    struct update accepted[REFRESH_BANDS_MAX];unsigned count=0,done=0;bool failed=false,cancelled=false;
     uint64_t first_submit=0,last_submit=0,min_gap=UINT64_MAX;
+    bool timed=positions!=NULL;uint64_t schedule_start=timed?monotonic_ns():0;
     if(!n||n>REFRESH_BANDS_MAX)return 0;
     for(unsigned i=0;i<n;i++){
+        if(timed&&(app_quit||atomic_load(&d->turn_cancel))){cancelled=true;break;}
+        if(timed&&d->turn_options.max_inflight&&count-done>=d->turn_options.max_inflight){
+            if(wait_marker(d,&accepted[done],true,trace)<0){app_quit=1;return -1;}
+            done++;
+        }
         /* Submission acceptance can return before a visible panel change.
          * Keep animated bands separated even when the driver queues quickly;
          * normal mixed-color regions have no deliberate delay. */
-        if(gap_ns&&last_submit){
-            uint64_t now=monotonic_ns(),due=last_submit+gap_ns;
+        if(timed||(gap_ns&&last_submit)){
+            uint64_t now=monotonic_ns(),due=timed?turn_due_ns(&d->turn_options,schedule_start,last_submit,positions[i],span_pixels):last_submit+gap_ns;
             if(now<due){
                 struct timespec delay={(time_t)((due-now)/1000000000ULL),(long)((due-now)%1000000000ULL)};
-                while(nanosleep(&delay,&delay)<0&&errno==EINTR){}
+                while(nanosleep(&delay,&delay)<0&&errno==EINTR){if(timed&&(app_quit||atomic_load(&d->turn_cancel)))break;}
             }
         }
+        if(timed&&(app_quit||atomic_load(&d->turn_cancel))){cancelled=true;break;}
         struct update u=updates[i];u.marker=next_marker(d);
-        uint64_t submitted_at=gap_ns?monotonic_ns():0;
-        if(ioctl(d->fd,SEND_UPDATE,&u)<0){failed=true;break;}
-        if(gap_ns){
+        uint64_t submitted_at=(gap_ns||timed)?monotonic_ns():0;
+        if(send_update(d,&u,trace)<0){failed=true;break;}
+        if(gap_ns||timed){
             if(!first_submit)first_submit=submitted_at;
             if(last_submit&&submitted_at-last_submit<min_gap)min_gap=submitted_at-last_submit;
             last_submit=submitted_at;
         }
-        markers[count++]=u.marker;*last=u;
-        uint32_t marker=u.marker;
-        if(ioctl(d->fd,WAIT_SUBMISSION,&marker)<0){failed=true;break;}
+        accepted[count++]=u;*last=u;
+        if(wait_marker(d,&u,false,trace)<0){failed=true;break;}
     }
-    for(unsigned i=0;i<count;i++){
-        uint32_t marker[2]={markers[i],0};
-        if(ioctl(d->fd,WAIT_COMPLETE,marker)<0){
+    for(unsigned i=done;i<count;i++){
+        if(wait_marker(d,&accepted[i],true,trace)<0){
             fprintf(stderr,"[display-sequence] completion failed: %s\n",strerror(errno));app_quit=1;return -1;
         }
     }
     /* A rejected marker was never submitted and cannot be waited on. */
-    d->completed_marker=d->marker;
-    if(failed){fprintf(stderr,"[display-sequence] submission failed; restoring normal page update\n");return 0;}
-    if(gap_ns&&count>1)fprintf(stderr,"[page-turn] submissions=%u span_ms=%.1f min_gap_ms=%.1f\n",count,(last_submit-first_submit)/1000000.0,min_gap/1000000.0);
+    if(count)d->completed_marker=accepted[count-1].marker;
+    if(failed||cancelled){if(trace)trace->fallback=cancelled?"cancelled":"submission-error";fprintf(stderr,"[display-sequence] %s; restoring normal page update\n",cancelled?"cancelled":"submission failed");return 0;}
+    if((gap_ns||timed)&&count>1)fprintf(stderr,"[page-turn] submissions=%u span_ms=%.1f min_gap_ms=%.1f\n",count,(last_submit-first_submit)/1000000.0,min_gap/1000000.0);
     return 1;
 }
 /* Color pages and explicit cleans never use the animation sweep. */
-static int page_turn_bands(Display *d,bool forward,bool night,struct update *last){
-    unsigned steps=d->page_turn_steps;struct update updates[REFRESH_BANDS_MAX];
+static int page_turn_bands(Display *d,bool forward,bool night,struct update *last,TurnTrace *trace){
+    bool timed=d->turn_options.profile==TURN_TIMED;
+    unsigned steps=timed?d->turn_options.bands:d->page_turn_steps;
+    struct update updates[REFRESH_BANDS_MAX];unsigned positions[REFRESH_BANDS_MAX];
     for(unsigned i=0;i<steps;i++){
         RefreshRegion r;
         unsigned w=d->page_turn_vertical?d->v.yres:d->v.xres,h=d->page_turn_vertical?d->v.xres:d->v.yres;
         if(!refresh_band(w,h,steps,i,forward,&r))return 0;
+        positions[i]=forward?w-r.left-r.width:r.left;
         if(d->page_turn_vertical)r=(RefreshRegion){0,r.left,r.height,r.width};
         updates[i]=(struct update){.region={r.top,r.left,r.width,r.height},
             .waveform=night?REFRESH_GLKW16:REFRESH_GCK16,.mode=0,.flags=0x8000};
@@ -148,12 +185,12 @@ static int page_turn_bands(Display *d,bool forward,bool night,struct update *las
     /* A narrower advancing edge rather than ten page-height coarse blocks.
      * The original speed setting controls both band count and pacing. */
     uint64_t gap_ns=steps<=16?6000000ULL:steps<=24?8000000ULL:10000000ULL;
-    int result=submit_sequence(d,updates,steps,last,gap_ns);if(result!=1)return result;
+    int result=submit_sequence(d,updates,steps,last,gap_ns,timed?positions:NULL,positions[steps-1],trace);if(result!=1)return result;
     d->animated_refreshes++;
     fprintf(stderr,"[page-turn] bands=%u direction=%s vertical=%u night=%u\n",steps,forward?"next":"prev",d->page_turn_vertical,night);
     return 1;
 }
-static int night_color_parts(Display *d,const RefreshPart *parts,unsigned n,struct update *last){
+static int night_color_parts(Display *d,const RefreshPart *parts,unsigned n,struct update *last,TurnTrace *trace){
     struct update updates[REFRESH_PARTS_MAX];unsigned color_rows=0;
     for(unsigned i=0;i<n;i++){
         RefreshRegion r=parts[i].region;
@@ -162,7 +199,7 @@ static int night_color_parts(Display *d,const RefreshPart *parts,unsigned n,stru
             .mode=1,.flags=parts[i].color?REFRESH_CFA_G2:0};
         if(parts[i].color)color_rows+=r.height;
     }
-    int result=submit_sequence(d,updates,n,last,0);if(result!=1)return result;
+    int result=submit_sequence(d,updates,n,last,0,NULL,0,trace);if(result!=1)return result;
     d->localized_color_refreshes++;
     fprintf(stderr,"[night-color] regions=%u cfa_rows=%u/%u\n",n,color_rows,d->v.yres);
     return 1;
@@ -197,6 +234,15 @@ static void flush(Display *d,const uint8_t *cover){
                      d->v.xres,d->v.yres,cover||d->full,d->mode,&plan)){
         d->dirty=false;pthread_mutex_unlock(&d->lock);return;
     }
+    TurnTrace storage,*trace=NULL;
+    if(d->turn_options.trace){
+        turn_trace_init(&storage,true,++d->trace_serial);trace=&storage;
+        trace->options=d->turn_options;
+        trace->flush=now;
+        if(d->page_turn_direction&&now<=d->page_turn_until){
+            trace->input=d->turn_input_ns;trace->arm=d->turn_arm_ns;trace->first_frame=d->turn_first_frame_ns;trace->last_frame=d->turn_last_frame_ns;
+        }
+    }
     if(cover)plan.hw_invert=false;
     else{
         if(!plan.frame_night)d->direct_night=false;
@@ -227,17 +273,22 @@ static void flush(Display *d,const uint8_t *cover){
                                      d->pending_stride,d->v.xres,d->v.yres,parts);
     bool animate=!cover&&!plan.clean&&!plan.color&&!plan.frame_color&&!inversion_change&&plan.major&&
         d->page_turn_direction&&now<=d->page_turn_until&&d->v.xres>=160;
+    if(d->turn_options.profile==TURN_OFF)animate=false;
+    if(d->turn_options.profile==TURN_TIMED&&
+       (d->v.xres!=1072||d->v.yres!=1448||d->v.rotate!=3))animate=false;
     bool forward=d->page_turn_direction>0;
     if(cover||plan.major||plan.clean||now>d->page_turn_until)d->page_turn_direction=0;
     if(animate||part_count)plan.region=(RefreshRegion){0,0,d->v.xres,d->v.yres};
+    if(trace)trace->planned=monotonic_ns();
     /* Wake before either wait or submit, as in KOReader's MTK path. */
-    if(display_command("fiti_power 1")){perror("display wake");app_quit=1;pthread_mutex_unlock(&d->lock);return;}
-    if(display_wait(d)<0){fprintf(stderr,"[display] wait for prior update failed: %s\n",strerror(errno));app_quit=1;pthread_mutex_unlock(&d->lock);return;}
-    if(inversion_change&&display_inversion(d,plan.hw_invert)){perror("display inversion");app_quit=1;pthread_mutex_unlock(&d->lock);return;}
+    if(display_command("fiti_power 1")){perror("display wake");app_quit=1;turn_trace_dump(trace,"wake-error",monotonic_ns());pthread_mutex_unlock(&d->lock);return;}
+    if(display_wait_traced(d,trace)<0){fprintf(stderr,"[display] wait for prior update failed: %s\n",strerror(errno));app_quit=1;turn_trace_dump(trace,"prior-wait-error",monotonic_ns());pthread_mutex_unlock(&d->lock);return;}
+    if(inversion_change&&display_inversion(d,plan.hw_invert)){perror("display inversion");app_quit=1;turn_trace_dump(trace,"invert-error",monotonic_ns());pthread_mutex_unlock(&d->lock);return;}
     unsigned endx=plan.region.left+plan.region.width,endy=plan.region.top+plan.region.height;
     uint32_t alpha=field(255,d->v.transp);
     bool native_rgb=d->v.red.length==8&&d->v.green.length==8&&d->v.blue.length==8&&
         d->v.red.offset==0&&d->v.green.offset==8&&d->v.blue.offset==16;
+    if(trace)trace->copy_begin=monotonic_ns();
     for(unsigned y=plan.region.top;y<endy;y++){
         uint32_t *dst=(uint32_t*)(d->mem+(y+d->v.yoffset)*d->f.line_length+d->v.xoffset*4);
         const uint8_t *src=source+y*d->pending_stride;
@@ -253,16 +304,23 @@ static void flush(Display *d,const uint8_t *cover){
                 field(r,d->v.red)|field(g,d->v.green)|field(b,d->v.blue)|alpha;
         }
     }
+    if(trace)trace->copied=monotonic_ns();
     {
         /* REAGL and Kaleido both require UPDATE_MODE_FULL on this model;
          * that flag does not itself mean a full-screen flashing cleanup. */
         struct update u={0};
-        int bands=animate?page_turn_bands(d,forward,plan.night,&u):
-                  part_count?night_color_parts(d,parts,part_count,&u):0;
-        if(bands<0){pthread_mutex_unlock(&d->lock);return;}
+        int bands=animate?page_turn_bands(d,forward,plan.night,&u,trace):
+                  part_count?night_color_parts(d,parts,part_count,&u,trace):0;
+        if(bands<0){turn_trace_dump(trace,"sequence-wait-error",monotonic_ns());pthread_mutex_unlock(&d->lock);return;}
         if(!bands)u=(struct update){.region={plan.region.top,plan.region.left,plan.region.width,plan.region.height},.waveform=plan.waveform,.mode=1,.marker=next_marker(d),.flags=plan.flags};
-        if(!bands&&ioctl(d->fd,SEND_UPDATE,&u)<0){fprintf(stderr,"[display] HWTCON_SEND_UPDATE failed: %s\n",strerror(errno));d->full=true;d->failures++;if(d->failures>=3)app_quit=1;}
+        if(!bands&&send_update(d,&u,trace)<0){fprintf(stderr,"[display] HWTCON_SEND_UPDATE failed: %s\n",strerror(errno));d->full=true;d->failures++;if(d->failures>=3)app_quit=1;}
         else {
+            /* Never call an unconfirmed target the committed image. This
+             * error-path fix leaves successful profile timings/waves intact. */
+            if(!bands){
+                if(wait_marker(d,&u,true,trace)<0){app_quit=1;turn_trace_dump(trace,"complete-error",monotonic_ns());pthread_mutex_unlock(&d->lock);return;}
+                d->completed_marker=u.marker;
+            }
             for(unsigned y=plan.region.top;y<endy;y++)memcpy(
                 d->committed+y*d->pending_stride+plan.region.left*4,
                 source+y*d->pending_stride+plan.region.left*4,plan.region.width*4);
@@ -274,7 +332,7 @@ static void flush(Display *d,const uint8_t *cover){
             if(cover)d->request_clean_at=0;
             /* FULL REAGL/CFA transactions are completed before another
              * framebuffer or global inversion change, matching KOReader. */
-            if(display_wait(d)<0){fprintf(stderr,"[display] wait for completion failed: %s\n",strerror(errno));app_quit=1;}
+            if(display_wait_traced(d,trace)<0){fprintf(stderr,"[display] wait for completion failed: %s\n",strerror(errno));app_quit=1;}
             if(d->refreshes==1)fprintf(stderr,"[display] FIRST_UPDATE_SUBMITTED marker=%u\n",u.marker);
             if(d->refreshes<=30||plan.clean||d->last_waveform!=u.waveform)fprintf(stderr,"[refresh] marker=%u wave=%u clean=%u color=%u night=%u hw_invert=%u flags=0x%x dither=%d transition=%u region=%u,%u %ux%u changed=%u work_ms=%.1f\n",
                 u.marker,u.waveform,plan.clean,plan.color,plan.night,plan.hw_invert,u.flags,u.dither,plan.polarity_changed,plan.region.left,plan.region.top,plan.region.width,plan.region.height,plan.changed,(monotonic_ns()-now)/1000000.0);
@@ -282,15 +340,25 @@ static void flush(Display *d,const uint8_t *cover){
         }
         d->last_refresh=monotonic_ns();
     }
+    turn_trace_dump(trace,app_quit?"quit-or-error":d->failures?"send-error":"complete",monotonic_ns());
     d->dirty=d->failures>0;pthread_mutex_unlock(&d->lock);
 }
 void display_flush(Display *d){flush(d,NULL);}
-int display_wait(Display *d){
-    if(!d->refreshes||d->completed_marker==d->marker)return 0;
-    uint32_t marker[2]={d->marker,0};int result=ioctl(d->fd,WAIT_COMPLETE,marker);
-    if(result>=0)d->completed_marker=d->marker;
+static int display_wait_traced(Display *d,TurnTrace *trace){
+    if(!d->last_accepted_marker||d->completed_marker==d->last_accepted_marker)return 0;
+    struct update u={.marker=d->last_accepted_marker};
+    if(trace)for(unsigned i=trace->count;i>0;i--){
+        const TurnEvent *e=&trace->event[i-1];
+        if(e->marker==u.marker&&!strcmp(e->op,"send")&&e->result>=0){
+            u.region=(struct rect){e->region.top,e->region.left,e->region.width,e->region.height};
+            u.waveform=e->wave;u.mode=e->mode;u.flags=e->flags;break;
+        }
+    }
+    int result=wait_marker(d,&u,true,trace);
+    if(result>=0)d->completed_marker=u.marker;
     return result;
 }
+int display_wait(Display *d){return display_wait_traced(d,NULL);}
 int display_cover(Display *d,const char *path,unsigned width,unsigned height,unsigned channels){
     if(!width||!height||width>4096||height>4096||channels<1||channels>4){errno=EINVAL;return -1;}
     FILE *f=fopen(path,"rb");if(!f)return -1;

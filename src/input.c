@@ -8,6 +8,8 @@
 #include <sys/ioctl.h>
 #include <linux/input.h>
 static bool (*pointer_filter)(FlutterPointerEvent *);
+static void (*input_observer)(uint64_t);
+void touch_set_observer(void (*observer)(uint64_t)){input_observer=observer;}
 void touch_set_filter(bool (*filter)(FlutterPointerEvent *)){pointer_filter=filter;}
 static void send_pointer(FlutterEngine e,Contact *c,FlutterPointerPhase phase,unsigned w,unsigned h,Touch *t){
     double nx=(double)(c->x-t->min_x)/(t->max_x-t->min_x),ny=(double)(c->y-t->min_y)/(t->max_y-t->min_y);
@@ -50,7 +52,9 @@ static void sync_contacts(Touch *t,FlutterEngine e,unsigned w,unsigned h){
 }
 void touch_process(Touch *t,FlutterEngine engine,unsigned w,unsigned h){
     struct input_event events[64];ssize_t n;
-    while((n=read(t->fd,events,sizeof(events)))>0)for(size_t i=0;i<(size_t)n/sizeof(*events);i++){
+    while((n=read(t->fd,events,sizeof(events)))>0){
+      if(input_observer)input_observer(monotonic_ns());
+      for(size_t i=0;i<(size_t)n/sizeof(*events);i++){
         struct input_event ev=events[i];
         if(ev.type==EV_SYN&&ev.code==SYN_DROPPED){cancel_all(t,engine,w,h);memset(t->report,0,sizeof(t->report));t->dropped=true;continue;}
         if(t->dropped){if(ev.type==EV_SYN&&ev.code==SYN_REPORT){t->dropped=false;t->report_count=0;t->current=(Contact){.id=-1};}continue;}
@@ -66,6 +70,7 @@ void touch_process(Touch *t,FlutterEngine engine,unsigned w,unsigned h){
             else if(ev.type==EV_SYN&&ev.code==SYN_MT_REPORT){if(t->current.active&&t->report_count<16)t->report[t->report_count++]=t->current;t->current=(Contact){.id=-1};}
             else if(ev.type==EV_SYN&&ev.code==SYN_REPORT){if(t->current.active&&t->report_count<16)t->report[t->report_count++]=t->current;sync_contacts(t,engine,w,h);t->report_count=0;t->current=(Contact){.id=-1};}
         }
+      }
     }
 }
 void touch_close(Touch *t,FlutterEngine e){

@@ -24,6 +24,9 @@ static unsigned band_top[128];
 static bool expect_parts;
 static unsigned part_color_rows,part_gray_rows;
 static uint64_t last_band_submit;
+static unsigned cancel_at_band,fail_submission_at,peak_outstanding;
+static bool fail_complete_once,fail_normal_once;
+static uint8_t *immutable_image;
 static uint32_t last_first_pixel;
 static Display *display;
 static FILE *__real_fopen(const char *path,const char *mode){return fopen(path,mode);}
@@ -48,13 +51,14 @@ int __wrap_fclose(FILE *f){
 struct update_record {uint32_t top,left,width,height,waveform,mode,marker,flags;int dither;};
 int __wrap_ioctl(int fd,unsigned long request,...){
     assert(fd==99);va_list args;va_start(args,request);void *p=va_arg(args,void *);va_end(args);
+    if(outstanding)assert(immutable_image&&!memcmp(immutable_image,display->mem,display->length));
     if(request==0x4024462eUL){
         struct update_record *u=p;assert(u->dither==0&&!needs_submission_wait);
         assert(u->left%16==0&&u->top%16==0&&u->left+u->width<=display->v.xres&&u->top+u->height<=display->v.yres);
         if(u->mode==0){
             uint64_t now=monotonic_ns();
             uint64_t minimum=display->page_turn_steps<=16?4000000ULL:display->page_turn_steps<=24?6000000ULL:8000000ULL;
-            if(outstanding)assert(now-last_band_submit>=minimum);
+            if(outstanding&&display->turn_options.profile!=TURN_TIMED)assert(now-last_band_submit>=minimum);
             last_band_submit=now;
             band_count++;assert(u->flags==0x8000);
             assert(u->waveform==REFRESH_GCK16||u->waveform==REFRESH_GLKW16);
@@ -65,18 +69,23 @@ int __wrap_ioctl(int fd,unsigned long request,...){
             if(u->flags==REFRESH_CFA_G2){assert(u->waveform==REFRESH_GLRC16);part_color_rows+=u->height;}
             else {assert(u->flags==0&&u->waveform==REFRESH_GLKW16);part_gray_rows+=u->height;}
             needs_submission_wait=true;
-        }else assert(u->mode==1&&!outstanding);
+        }else {assert(u->mode==1&&!outstanding);if(fail_normal_once){fail_normal_once=false;errno=EIO;return -1;}}
         assert(u->marker<1024&&!pending_markers[u->marker]);
-        pending_markers[u->marker]=true;outstanding++;
+        if(!outstanding){immutable_image=malloc(display->length);assert(immutable_image);memcpy(immutable_image,display->mem,display->length);}
+        pending_markers[u->marker]=true;outstanding++;if(outstanding>peak_outstanding)peak_outstanding=outstanding;
         submitted=u->marker;last_wave=u->waveform;last_flags=u->flags;
         last_first_pixel=((uint32_t*)display->mem)[0];in_flight=true;
     }else if(request==0x40044637UL){
         assert(*(uint32_t*)p==submitted&&needs_submission_wait);
         needs_submission_wait=false;submission_waits++;
+        if(cancel_at_band&&band_count==cancel_at_band){cancel_at_band=0;display_cancel_page_turn(display);}
+        if(fail_submission_at==submission_waits){fail_submission_at=0;errno=EIO;return -1;}
     }else{
         assert(request==0xc008462fUL);unsigned marker=*(uint32_t*)p;
         assert(marker<1024&&pending_markers[marker]&&outstanding);
+        if(fail_complete_once){fail_complete_once=false;errno=EIO;return -1;}
         pending_markers[marker]=false;outstanding--;
+        if(!outstanding){free(immutable_image);immutable_image=NULL;}
         completed=marker;in_flight=outstanding>0;
     }
     return 0;
@@ -189,6 +198,85 @@ static void check_localized_color(Display *original){
     assert(!display_inversion(&d,false));
     free(d.pending);free(d.committed);free(d.mem);pthread_mutex_destroy(&d.lock);display=original;
 }
+static void check_experimental_turns(Display *original){
+    Display d={.fd=99,.pending_stride=1072*4,.length=1072*1448*4};display=&d;
+    d.v.xres=1072;d.v.yres=1448;d.v.rotate=3;d.f.line_length=d.pending_stride;
+    d.v.red=(struct fb_bitfield){0,8,0};d.v.green=(struct fb_bitfield){8,8,0};
+    d.v.blue=(struct fb_bitfield){16,8,0};d.v.transp=(struct fb_bitfield){24,8,0};
+    d.pending=malloc(d.length);d.committed=malloc(d.length);d.mem=calloc(1,d.length);
+    assert(d.pending&&d.committed&&d.mem);pthread_mutex_init(&d.lock,NULL);strcpy(d.mode,"balanced");
+    memset(d.pending,255,d.length);d.frames=1;d.dirty=d.full=true;flush_now(&d);
+    d.turn_options=(TurnOptions){.profile=TURN_OFF,.trace=true};
+    assert(display_arm_page_turn(&d,true,false,16));memset(d.pending,190,d.length);d.dirty=true;
+    unsigned at=band_count;flush_now(&d);assert(band_count==at&&!d.animated_refreshes);
+    d.turn_options=(TurnOptions){.profile=TURN_TIMED,.bands=16,.span_us=150000,.min_gap_us=2000,.trace=true};
+    /* Several pending arm commands coalesce to the latest semantic direction;
+     * this does not pretend to measure live input during the blocking loop. */
+    for(unsigned turn=0;turn<6;turn++){
+        assert(display_arm_page_turn(&d,true,false,16));
+        assert(display_arm_page_turn(&d,turn%2==0,false,16));
+        memset(d.pending,turn%2?190:210,d.length);d.dirty=true;at=band_count;
+        flush_now(&d);assert(band_count==at+16&&d.animated_refreshes==turn+1);
+        for(unsigned i=1;i<16;i++){
+            unsigned a=band_left[(at+i)%128],b=band_left[(at+i+1)%128];
+            assert(turn%2?a<b:a>b);
+        }
+        assert(!memcmp(d.pending,d.committed,d.length));
+    }
+    d.turn_options.max_inflight=4;peak_outstanding=0;
+    assert(display_arm_page_turn(&d,true,false,16));memset(d.pending,180,d.length);d.dirty=true;flush_now(&d);
+    assert(peak_outstanding<=4);
+    /* Cooperative cancellation after three accepted bands must fence all
+     * accepted work, then restore a complete ordinary page with no seams. */
+    d.turn_options.max_inflight=0;cancel_at_band=band_count+3;
+    assert(display_arm_page_turn(&d,true,false,16));memset(d.pending,200,d.length);d.dirty=true;
+    at=band_count;unsigned animations=d.animated_refreshes;flush_now(&d);
+    assert(band_count==at+3&&d.animated_refreshes==animations&&!outstanding&&last_wave==REFRESH_GLR16);
+    assert(!memcmp(d.pending,d.committed,d.length));
+    fail_submission_at=submission_waits+2;
+    assert(display_arm_page_turn(&d,false,false,16));memset(d.pending,180,d.length);d.dirty=true;
+    flush_now(&d);assert(d.animated_refreshes==animations&&!outstanding);
+    assert(!memcmp(d.pending,d.committed,d.length));
+    /* Unknown rotation and real color must bypass the experiment. */
+    d.v.rotate=0;assert(display_arm_page_turn(&d,true,false,16));
+    memset(d.pending,200,d.length);d.dirty=true;at=band_count;flush_now(&d);assert(band_count==at);
+    d.v.rotate=3;assert(display_arm_page_turn(&d,true,false,16));
+    memset(d.pending,180,d.length);d.pending[0]=250;d.dirty=true;
+    flush_now(&d);assert(band_count==at&&last_flags==REFRESH_CFA_G2);
+    memset(d.pending,200,d.length);d.dirty=true;flush_now(&d); /* Erase old color safely. */
+    /* Night, explicit clean and vertical geometry keep their original
+     * waveforms/directions under the new timing policy. */
+    assert(display_arm_page_turn(&d,true,false,16));
+    memset(d.pending,0,d.length);display_full(&d);flush_now(&d);
+    at=band_count;assert(last_wave==REFRESH_GCK16&&inverted);
+    assert(display_arm_page_turn(&d,true,false,16));
+    memset(d.pending,40,d.length);d.dirty=true;flush_now(&d);
+    assert(band_count==at+16&&last_wave==REFRESH_GLKW16&&inverted);
+    memset(d.pending,200,d.length);display_full(&d);flush_now(&d);
+    assert(display_arm_page_turn(&d,true,true,16));
+    memset(d.pending,180,d.length);d.dirty=true;at=band_count;flush_now(&d);
+    assert(band_count==at+16&&!inverted);
+    for(unsigned i=1;i<16;i++)assert(band_top[(at+i)%128]>band_top[(at+i+1)%128]);
+    /* A rejected ordinary SEND must never become the next wait target.
+     * Verify this fix also preserves stable-profile success behavior. */
+    d.turn_options.profile=TURN_STABLE;
+    memset(d.pending,200,d.length);d.dirty=true;fail_normal_once=true;
+    d.last_refresh=d.last_present=d.first_dirty=0;display_flush(&d);
+    assert(d.failures==1&&!outstanding&&d.committed[0]==180);
+    assert(d.last_accepted_marker==d.completed_marker&&d.marker!=d.last_accepted_marker);
+    assert(display_wait(&d)==0);
+    flush_now(&d);assert(d.failures==0&&d.committed[0]==200);
+    d.turn_options.profile=TURN_TIMED;
+    /* A failed completion must not advance the logical committed image. */
+    memset(d.pending,160,d.length);d.dirty=true;fail_complete_once=true;
+    d.last_refresh=d.last_present=d.first_dirty=0;display_flush(&d);
+    assert(app_quit&&d.committed[0]==200);
+    assert(display_wait(&d)==0);app_quit=0; /* Mock a later kernel completion for cleanup. */
+    assert(!outstanding&&!immutable_image);
+    assert(!display_inversion(&d,false));
+    free(d.pending);free(d.committed);free(d.mem);pthread_mutex_destroy(&d.lock);display=original;
+    puts("PASS: off/timed profiles, repeated and reversed arms, queue cap, cancellation, submission failure, immutable framebuffer, unknown rotation/color fallback and failed-completion cache");
+}
 int main(void){
     char root[]="/tmp/reeden-display-test-XXXXXX";assert(mkdtemp(root));char path[512];
     snprintf(path,sizeof(path),"%s/state",root);assert(!mkdir(path,0700));assert(!setenv("REEDEN_KOBO_DIR",root,1));
@@ -237,6 +325,7 @@ int main(void){
     unlink(path);snprintf(path,sizeof(path),"%s/state/night-invert",root);assert(access(path,F_OK)<0);
     check_page_turns(&d);
     check_localized_color(&d);
+    check_experimental_turns(&d);
     /* A failed global write must retain its recovery obligation and abort. */
     fail_inversion=true;d.direct_night=false;display_full(&d);flush_now(&d);assert(app_quit&&access(path,F_OK)==0);
     unlink(path);snprintf(path,sizeof(path),"%s/state",root);rmdir(path);rmdir(root);
