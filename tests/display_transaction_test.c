@@ -51,13 +51,16 @@ int __wrap_fclose(FILE *f){
 }
 struct update_record {uint32_t top,left,width,height,waveform,mode,marker,flags;int dither;};
 int __wrap_ioctl(int fd,unsigned long request,...){
+    /* Timestamp call entry, before the mock's multi-megabyte memcmp. On ARM
+     * that validation cost varies enough to distort an internal timestamp. */
+    uint64_t ioctl_entered=monotonic_ns();
     assert(fd==99);va_list args;va_start(args,request);void *p=va_arg(args,void *);va_end(args);
     if(outstanding)assert(immutable_image&&!memcmp(immutable_image,display->mem,display->length));
     if(request==0x4024462eUL){
         struct update_record *u=p;assert(u->dither==0&&!needs_submission_wait);
         assert(u->left%16==0&&u->top%16==0&&u->left+u->width<=display->v.xres&&u->top+u->height<=display->v.yres);
         if(u->flags==0x8000&&(u->width<display->v.xres||u->height<display->v.yres)){
-            uint64_t now=monotonic_ns();
+            uint64_t now=ioctl_entered;
             uint64_t minimum=display->page_turn_steps<=16?4000000ULL:display->page_turn_steps<=24?6000000ULL:8000000ULL;
             if(outstanding&&display->turn_options.profile!=TURN_TIMED)assert(now-last_band_submit>=minimum);
             last_band_submit=now;
