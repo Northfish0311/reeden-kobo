@@ -11,7 +11,7 @@ body:
     id: port
     attributes:
       label: 适配层版本或提交
-      placeholder: 例如 v0.7.4
+      placeholder: 例如 v0.7.5
     validations:
       required: true
   - type: input

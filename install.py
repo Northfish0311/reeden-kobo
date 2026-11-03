@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Reeden Kobo (0.7.4) One-Click Builder & Installer.
+"""Reeden Kobo (0.7.5) One-Click Builder & Installer.
 
 Combines the verified MIT Kobo compatibility layer with the user's unmodified
 official Reeden Kindle 1.43.1+780 or 1.43.2+791 core and pinned Debian Bullseye ARMHF runtime
@@ -43,7 +43,7 @@ SUPPORTED_CORES = {
     },
 }
 OFFICIAL_LATEST_URL = 'https://download.reeden.app/Reeden/latest/Reeden-kindle.zip'
-PORT_VERSION = '0.7.4-experimental'
+PORT_VERSION = '0.7.5-experimental'
 SUPPORTED_PRODUCT = '393'
 
 
@@ -248,7 +248,7 @@ def resolve_official_core(user_arg: str | None, temp_root: pathlib.Path, auto_do
             cache_zip = ROOT / 'cache' / 'Reeden-kindle.zip'
             cache_zip.parent.mkdir(parents=True, exist_ok=True)
             print(f'[1/4] 正在从 Reeden 官网下载最新安装包 ({OFFICIAL_LATEST_URL}) ...')
-            req = urllib.request.Request(OFFICIAL_LATEST_URL, headers={'User-Agent': 'reeden-kobo-installer/0.7.4'})
+            req = urllib.request.Request(OFFICIAL_LATEST_URL, headers={'User-Agent': 'reeden-kobo-installer/0.7.5'})
             with open_url_with_cert_fallback(req, timeout=180) as resp, cache_zip.open('wb') as out:
                 shutil.copyfileobj(resp, out)
             target = cache_zip
@@ -262,7 +262,7 @@ def resolve_official_core(user_arg: str | None, temp_root: pathlib.Path, auto_do
                 cache_zip = ROOT / 'cache' / 'Reeden-kindle.zip'
                 cache_zip.parent.mkdir(parents=True, exist_ok=True)
                 print(f'[1/4] 正在从 Reeden 官网下载最新安装包 ({OFFICIAL_LATEST_URL}) ...')
-                req = urllib.request.Request(OFFICIAL_LATEST_URL, headers={'User-Agent': 'reeden-kobo-installer/0.7.4'})
+                req = urllib.request.Request(OFFICIAL_LATEST_URL, headers={'User-Agent': 'reeden-kobo-installer/0.7.5'})
                 with open_url_with_cert_fallback(req, timeout=180) as resp, cache_zip.open('wb') as out:
                     shutil.copyfileobj(resp, out)
                 target = cache_zip
@@ -331,7 +331,7 @@ def download_verified(url: str, sha256: str, cache_dir: pathlib.Path, alt_dirs: 
     cache_dir.mkdir(parents=True, exist_ok=True)
     dest = cache_dir / filename
     print(f'      下载依赖: {filename} ...')
-    req = urllib.request.Request(url, headers={'User-Agent': 'reeden-kobo-installer/0.7.4'})
+    req = urllib.request.Request(url, headers={'User-Agent': 'reeden-kobo-installer/0.7.5'})
     with open_url_with_cert_fallback(req, timeout=60) as resp, dest.open('wb') as out:
         shutil.copyfileobj(resp, out)
     if sha256_file(dest) != sha256:
