@@ -236,8 +236,31 @@ def extract_official_zip(archive: pathlib.Path, dest: pathlib.Path) -> None:
                     shutil.copyfileobj(src, out)
 
 
+def download_official_zip(temp_root: pathlib.Path) -> pathlib.Path:
+    target = temp_root / 'official-download.zip'
+    print(f'[1/4] 正在从 Reeden 官网下载最新安装包 ({OFFICIAL_LATEST_URL}) ...')
+    req = urllib.request.Request(OFFICIAL_LATEST_URL, headers={'User-Agent': 'reeden-kobo-installer/0.7.5'})
+    with open_url_with_cert_fallback(req, timeout=180) as resp, target.open('wb') as out:
+        shutil.copyfileobj(resp, out)
+    return target
+
+
+def cache_official_zip(source: pathlib.Path) -> None:
+    cache_dir = ROOT / 'cache'
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    fd, name = tempfile.mkstemp(prefix='.official-', suffix='.part', dir=cache_dir)
+    os.close(fd)
+    staged = pathlib.Path(name)
+    try:
+        shutil.copyfile(source, staged)
+        os.replace(staged, cache_dir / 'Reeden-kindle.zip')
+    finally:
+        staged.unlink(missing_ok=True)
+
+
 def resolve_official_core(user_arg: str | None, temp_root: pathlib.Path, auto_download: bool = False) -> tuple[pathlib.Path, str]:
     target: pathlib.Path | None = None
+    downloaded = False
     if user_arg:
         target = pathlib.Path(user_arg).expanduser().resolve()
     else:
@@ -245,13 +268,8 @@ def resolve_official_core(user_arg: str | None, temp_root: pathlib.Path, auto_do
         if target is not None:
             print(f'[1/4] 自动发现官方包: {target}')
         elif auto_download:
-            cache_zip = ROOT / 'cache' / 'Reeden-kindle.zip'
-            cache_zip.parent.mkdir(parents=True, exist_ok=True)
-            print(f'[1/4] 正在从 Reeden 官网下载最新安装包 ({OFFICIAL_LATEST_URL}) ...')
-            req = urllib.request.Request(OFFICIAL_LATEST_URL, headers={'User-Agent': 'reeden-kobo-installer/0.7.5'})
-            with open_url_with_cert_fallback(req, timeout=180) as resp, cache_zip.open('wb') as out:
-                shutil.copyfileobj(resp, out)
-            target = cache_zip
+            target = download_official_zip(temp_root)
+            downloaded = True
         elif sys.stdin.isatty():
             print('\n未在当前目录或「下载」目录自动找到 Reeden-kindle.zip。')
             print('支持官方版本：1.43.2+791 或 1.43.1+780（白名单以本安装器为准）')
@@ -259,13 +277,8 @@ def resolve_official_core(user_arg: str | None, temp_root: pathlib.Path, auto_do
             if entered:
                 target = clean_dragged_path(entered).resolve()
             else:
-                cache_zip = ROOT / 'cache' / 'Reeden-kindle.zip'
-                cache_zip.parent.mkdir(parents=True, exist_ok=True)
-                print(f'[1/4] 正在从 Reeden 官网下载最新安装包 ({OFFICIAL_LATEST_URL}) ...')
-                req = urllib.request.Request(OFFICIAL_LATEST_URL, headers={'User-Agent': 'reeden-kobo-installer/0.7.5'})
-                with open_url_with_cert_fallback(req, timeout=180) as resp, cache_zip.open('wb') as out:
-                    shutil.copyfileobj(resp, out)
-                target = cache_zip
+                target = download_official_zip(temp_root)
+                downloaded = True
     if target is None or not target.exists():
         raise FileNotFoundError(
             '未找到官方 Reeden Kindle 安装包 (支持 1.43.2+791 或 1.43.1+780)。请将 Reeden-kindle.zip 放在同目录或系统「下载」文件夹，'
@@ -308,6 +321,9 @@ def resolve_official_core(user_arg: str | None, temp_root: pathlib.Path, auto_do
     for rel in ('data/flutter_assets', 'lib/glibc', 'licenses'):
         if not (core_dir / rel).is_dir():
             raise FileNotFoundError(f'缺少官方子目录: {core_dir / rel}')
+    # Only verified downloads become discoverable cache entries on the next run.
+    if downloaded:
+        cache_official_zip(target)
     print(f'[1/4] 官方 Reeden {matched_version} 核心 SHA-256 校验通过（原字节未修改）')
     return core_dir, matched_version
 
@@ -613,6 +629,16 @@ def check_usb_target(mount: pathlib.Path, allow_upgrade: bool) -> tuple[str, str
     return product, firmware
 
 
+def check_update_target(mount: pathlib.Path, expected: tuple[pathlib.Path, str]) -> None:
+    # Match both the mount and a private fingerprint of the device version record.
+    try:
+        same_device = (mount.resolve(), sha256_file(mount / '.kobo/version')) == expected
+    except OSError:
+        same_device = False
+    if not same_device or not (mount / '.adds/reeden-kobo').is_dir():
+        raise RuntimeError('更新目标已变化或原安装不可用，已停止写入。请确认仍连接原来的 Kobo 后重新运行更新。')
+
+
 def install_to_usb_mount(pkg_dir: pathlib.Path, mount: pathlib.Path, allow_upgrade: bool) -> None:
     # Repeat preflight here: the device may have changed while preparing the package.
     check_usb_target(mount, allow_upgrade)
@@ -793,14 +819,27 @@ def main() -> int:
         action='store_true',
         help='仅检查 USB 机型、NickelMenu 和会话锁；不联网、不组包、不写入设备，可配合 --kobo-mount 指定根目录',
     )
+    parser.add_argument(
+        '--update',
+        action='store_true',
+        help='一键 USB 更新已有安装：自动保留数据与旧版备份，缺少官方包时自动下载；可配合 --kobo-mount',
+    )
     args = parser.parse_args()
 
+    if args.update:
+        if args.check or args.ssh or args.output:
+            parser.error('--update 用于已有安装的 USB 更新，不能与 --check、SSH 或 --output 同时使用。')
+        args.upgrade = True
+        args.download_official = True
+        if not args.kobo_mount:
+            args.usb = True
     if args.check and (args.ssh or args.output or args.official_core or args.download_official):
         parser.error('--check 仅用于 USB 只读检查，不能与 SSH、输出目录或官方包选项同时使用。')
 
     # Reject known USB problems before downloading the official core or runtime.
     # Local-only packaging and SSH must not probe unrelated USB devices.
     mount = None
+    update_target = None
     automatic_usb = not (args.usb or args.kobo_mount or args.ssh or args.output)
     if args.kobo_mount:
         mount = pathlib.Path(args.kobo_mount).expanduser().resolve()
@@ -813,7 +852,13 @@ def main() -> int:
         product, firmware = check_usb_target(
             mount, allow_upgrade=args.check or args.upgrade or (automatic_usb and has_existing),
         )
+        if args.update and not (mount / '.adds/reeden-kobo').is_dir():
+            raise RuntimeError('未发现已有 Reeden Kobo 安装。首次使用请运行“一键安装”，更新入口不会执行全新安装。')
+        if args.update:
+            update_target = (mount.resolve(), sha256_file(mount / '.kobo/version'))
         print(f'[预检查] Kobo 产品代码 {product}，固件 {firmware}；NickelMenu 已检测到，未发现活动会话锁。')
+        if args.update:
+            print(f'即将更新到本下载包中的适配层 {PORT_VERSION}，自动保留书库、笔记、进度及旧版备份。')
     if args.check:
         print('只读基础检查完成：未联网、未组包、未写入设备。')
         print('此检查不验证屏幕效果、固件兼容性或完整安装空间；实际安装前仍会重新检查设备及所需空间。')
@@ -843,13 +888,18 @@ def main() -> int:
         # Explicit CLI mode selection
         if args.kobo_mount:
             mount = pathlib.Path(args.kobo_mount).expanduser().resolve()
+            if args.update:
+                check_update_target(mount, update_target)
             install_to_usb_mount(pkg_dir, mount, allow_upgrade=args.upgrade)
             return 0
         if args.usb:
             mounts = detect_kobo_usb_mounts()
             if not mounts:
                 raise RuntimeError('未检测到通过 USB 挂载的 Kobo 设备，请确认 Kobo 已连接电脑并处于 USB 传书模式。')
-            install_to_usb_mount(pkg_dir, choose_kobo_usb_mount(mounts), allow_upgrade=args.upgrade)
+            mount = choose_kobo_usb_mount(mounts)
+            if args.update:
+                check_update_target(mount, update_target)
+            install_to_usb_mount(pkg_dir, mount, allow_upgrade=args.upgrade)
             return 0
         if args.ssh:
             install_via_ssh(
