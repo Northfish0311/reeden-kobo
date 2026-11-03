@@ -1,3 +1,17 @@
+# Reeden Kobo 社区改进分支
+
+本仓库是 **Northfish0311** 基于 [SSNQ/reeden-kobo](https://github.com/SSNQ/reeden-kobo) 的社区 Fork。Kobo 适配层及下文历史成果来自原项目；本分支的首批改动是 USB 安装预检查与只读 `--check` 模式，不是重新开发的阅读器。
+
+**非官方、实验性项目。** 不代表 SSNQ 已接受本分支修改，也不代表 Reeden 或 Kobo 官方支持、授权合作或产品背书。原作者署名、MIT 许可证及第三方许可声明均予保留；不附带 Reeden 官方闭源核心，不修改其账号、付费或授权逻辑。详情见 [来源、修改范围与风险声明](docs/FORK-NOTES.md)。
+
+- **使用本分支：** [下载本分支 ZIP](https://github.com/Northfish0311/reeden-kobo/archive/refs/heads/main.zip)，完整解压。电脑需 Python 3.10+；先连接 Kobo 并在设备上点“连接”，在解压目录运行 `python install.py --check`（macOS/Linux 使用 `python3`）。检查通过后再按 [安装说明](docs/安装与卸载.md) 运行对应的一键安装脚本。安装前备份书库和笔记。
+- **提交给原作者：** [上游 Pull Request #1](https://github.com/SSNQ/reeden-kobo/pull/1)。提交不等于已合并，以该页面状态为准。
+- **验证范围：** 本轮仅做 Windows 模拟 USB、命令行与安装/卸载回归测试，未进行 Kobo 实机测试。跨平台构建情况见 [Actions](https://github.com/Northfish0311/reeden-kobo/actions/workflows/ci.yml)。不承诺解决文字残影、续航或其他固件兼容问题。
+
+以下保留上游 0.7.5 的说明和历史记录。下文链接到 SSNQ 的发布附件是**上游版本，不包含本分支尚未合并的修改**；上游的实测记录不能当成本 Fork 已完成实测。
+
+---
+
 # Reeden Kobo 兼容层 (0.7.5 Experimental)
 
 在 **Kobo Clara Colour（产品代码 393）** 上原字节运行官方 **Reeden Kindle（同时支持 `1.43.2+791` 与 `1.43.1+780`）** 核心的开源 C 宿主与硬件兼容层。
