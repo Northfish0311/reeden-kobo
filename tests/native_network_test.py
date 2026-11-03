@@ -2,6 +2,7 @@
 """Exercise native handoff without network access or hardware writes."""
 from pathlib import Path
 import os
+import re
 import subprocess
 import tempfile
 
@@ -28,8 +29,9 @@ with tempfile.TemporaryDirectory(prefix='reeden-native-network-') as tmp:
         'export PATH=/usr/local/Kobo:/usr/sbin:/usr/bin:/sbin:/bin',
         f'export PATH="{app}/stubs:/usr/bin:/bin"')
     wifi = (root / 'scripts/wifi.sh').read_text()
-    for prefix in ('/sys/', '/proc/', '/dev/', '/etc/', '/tmp/', '/mnt/onboard/'):
-        wifi = wifi.replace(prefix, str(app) + prefix)
+    # Rewrite once so an injected /tmp fixture path is not rewritten again.
+    wifi = re.sub(r'/(?:sys|proc|dev|etc|tmp|mnt/onboard)/',
+                  lambda match: str(app) + match.group(), wifi)
     wifi = wifi.replace('export PATH=/usr/local/Kobo:/usr/sbin:/usr/bin:/sbin:/bin',
                         f'export PATH="{app}/stubs:/usr/bin:/bin"')
     (app / 'wifi.sh').write_text(wifi)

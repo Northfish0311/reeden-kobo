@@ -2,6 +2,7 @@
 """Exercise real shell network/LIPC code with synthetic interfaces and daemons."""
 from pathlib import Path
 import os
+import re
 import subprocess
 import tempfile
 import unittest
@@ -38,8 +39,9 @@ kill() {{
 }}
 ''')
         source = (ROOT / 'scripts/wifi.sh').read_text()
-        for prefix in ['/sys/', '/proc/', '/dev/', '/etc/', '/tmp/', '/mnt/onboard/']:
-            source = source.replace(prefix, str(self.app) + prefix)
+        # Rewrite once so an injected /tmp fixture path is not rewritten again.
+        source = re.sub(r'/(?:sys|proc|dev|etc|tmp|mnt/onboard)/',
+                        lambda match: str(self.app) + match.group(), source)
         source = source.replace('export PATH=/usr/local/Kobo:/usr/sbin:/usr/bin:/sbin:/bin',
                                 f'export PATH="{self.app}/stubs:/usr/bin:/bin"')
         script = self.app / 'wifi.sh'; script.write_text(source); script.chmod(0o755)
