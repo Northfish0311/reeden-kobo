@@ -585,7 +585,8 @@ def choose_kobo_usb_mount(mounts: list[pathlib.Path]) -> pathlib.Path:
     return mounts[0]
 
 
-def install_to_usb_mount(pkg_dir: pathlib.Path, mount: pathlib.Path, allow_upgrade: bool) -> None:
+def check_usb_target(mount: pathlib.Path, allow_upgrade: bool) -> tuple[str, str]:
+    """Check USB prerequisites without creating or changing any device files."""
     product, firmware = parse_kobo_product(mount)
     if product != SUPPORTED_PRODUCT:
         raise RuntimeError(
@@ -609,7 +610,15 @@ def install_to_usb_mount(pkg_dir: pathlib.Path, mount: pathlib.Path, allow_upgra
             )
         if (dest / 'state' / 'active').exists():
             raise RuntimeError('检测到 Reeden 会话锁 state/active 仍存在，请先正常退出 Reeden 再升级。')
+    return product, firmware
 
+
+def install_to_usb_mount(pkg_dir: pathlib.Path, mount: pathlib.Path, allow_upgrade: bool) -> None:
+    # Repeat preflight here: the device may have changed while preparing the package.
+    check_usb_target(mount, allow_upgrade)
+    nm_dir = mount / '.adds' / 'nm'
+    dest = mount / '.adds' / 'reeden-kobo'
+    entry = nm_dir / 'reeden-kobo'
     keeps = ('userdata', 'storage', 'diagnostics/ssh')
     needed = sum(p.stat().st_size for p in pkg_dir.rglob('*') if p.is_file())
     for keep in keeps:
@@ -779,7 +788,36 @@ def main() -> int:
         action='store_true',
         help='若设备已安装旧版 reeden-kobo，自动备份旧版并保留 userdata/ 与 storage/ 完成升级',
     )
+    parser.add_argument(
+        '--check',
+        action='store_true',
+        help='仅检查 USB 机型、NickelMenu 和会话锁；不联网、不组包、不写入设备，可配合 --kobo-mount 指定根目录',
+    )
     args = parser.parse_args()
+
+    if args.check and (args.ssh or args.output or args.official_core or args.download_official):
+        parser.error('--check 仅用于 USB 只读检查，不能与 SSH、输出目录或官方包选项同时使用。')
+
+    # Reject known USB problems before downloading the official core or runtime.
+    # Local-only packaging and SSH must not probe unrelated USB devices.
+    mount = None
+    automatic_usb = not (args.usb or args.kobo_mount or args.ssh or args.output)
+    if args.kobo_mount:
+        mount = pathlib.Path(args.kobo_mount).expanduser().resolve()
+    elif args.usb or args.check or automatic_usb:
+        mounts = detect_kobo_usb_mounts()
+        if mounts or args.usb or args.check:
+            mount = choose_kobo_usb_mount(mounts)
+    if mount is not None:
+        has_existing = (mount / '.adds/reeden-kobo').exists()
+        product, firmware = check_usb_target(
+            mount, allow_upgrade=args.check or args.upgrade or (automatic_usb and has_existing),
+        )
+        print(f'[预检查] Kobo 产品代码 {product}，固件 {firmware}；NickelMenu 已检测到，未发现活动会话锁。')
+    if args.check:
+        print('只读基础检查完成：未联网、未组包、未写入设备。')
+        print('此检查不验证屏幕效果、固件兼容性或完整安装空间；实际安装前仍会重新检查设备及所需空间。')
+        return 0
 
     prebuilt_dir = verify_prebuilt(ROOT)
     with tempfile.TemporaryDirectory(prefix='reeden-kobo-oneclick-') as tmp:

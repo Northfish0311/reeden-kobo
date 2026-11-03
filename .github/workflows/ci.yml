@@ -86,6 +86,7 @@ jobs:
         shell: bash
         run: |
           python tests/oneclick_installer_test.py
+          python tests/usb_preflight_test.py
           python tests/uninstall_test.py
           python tests/archive_security_test.py
           python tests/desktop_launcher_test.py
