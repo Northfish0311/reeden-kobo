@@ -52,7 +52,9 @@ jobs:
             'tests/refresh_policy_test.c src/refresh_policy.c' \
             'tests/input_test.c src/input.c' \
             'tests/power_worker_test.c src/power_worker.c' \
-            'tests/display_transaction_test.c src/refresh_policy.c'
+            'tests/display_transaction_test.c src/refresh_policy.c src/turn_timing.c src/frame_evidence.c' \
+            'tests/turn_timing_test.c src/turn_timing.c src/refresh_policy.c' \
+            'tests/frame_evidence_test.c src/frame_evidence.c'
           do
             name=$(echo "$sources" | awk '{print $1}' | xargs basename -s .c)
             zig cc -D_GNU_SOURCE= -O2 -Wall -Wextra -Werror -Wno-unused-parameter -Iinclude -Isrc $sources -lpthread -lm -o "build/${name}-host"
