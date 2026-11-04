@@ -278,9 +278,14 @@ def validate_official_core(core_dir: pathlib.Path) -> str:
             if sha256_file(files[rel]) != digest:
                 raise ValueError(f'官方核心文件哈希不匹配: {rel}')
     else:
-        # Keep the existing 780 library allowlist until an official full fixture
-        # is available. Do not substitute 791 resource hashes for this version.
+        # No historical full-file manifest: these are minimum assembly/runtime
+        # requirements, not provenance checks for the remaining 780 files.
         assets = core_dir / 'data/flutter_assets'
+        for rel in ('THIRD_PARTY_NOTICES.txt', 'lib/glibc/reeden-kindle',
+                    'lib/glibc/libc.so.6'):
+            path = core_dir / rel
+            if not path.is_file() or path.stat().st_size == 0:
+                raise ValueError(f'官方组包必需文件缺失或为空: {rel}')
         version = json.loads((assets / 'version.json').read_text(encoding='utf-8'))
         if not isinstance(version, dict) or f'{version.get("version")}+{version.get("build_number")}' != matched_version:
             raise ValueError('官方资源版本与核心库不匹配')
@@ -288,11 +293,19 @@ def validate_official_core(core_dir: pathlib.Path) -> str:
                     'data/flutter_assets/FontManifest.json'):
             if not (core_dir / rel).is_file() or (core_dir / rel).stat().st_size == 0:
                 raise ValueError(f'官方资源文件缺失或为空: {rel}')
-        for font in json.loads((assets / 'FontManifest.json').read_text(encoding='utf-8')):
+        fonts = json.loads((assets / 'FontManifest.json').read_text(encoding='utf-8'))
+        if not isinstance(fonts, list):
+            raise ValueError('官方字体清单必须为数组')
+        for font in fonts:
+            if not isinstance(font, dict) or not isinstance(font.get('fonts'), list):
+                raise ValueError('官方字体清单条目无效')
             for face in font['fonts']:
+                if not isinstance(face, dict) or not isinstance(face.get('asset'), str):
+                    raise ValueError('官方字体资源路径必须为字符串')
                 parts = archive_parts(face['asset'])
-                if not assets.joinpath(*parts).is_file():
-                    raise ValueError(f'官方字体资源缺失: {face["asset"]}')
+                path = assets.joinpath(*parts)
+                if not path.is_file() or path.stat().st_size == 0:
+                    raise ValueError(f'官方字体资源缺失或为空: {face["asset"]}')
         for path in (core_dir / 'lib').glob('glibc*/data/flutter_assets/version.json'):
             if json.loads(path.read_text(encoding='utf-8')) != version:
                 raise ValueError('官方随包运行库资源版本不匹配')

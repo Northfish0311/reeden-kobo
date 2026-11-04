@@ -70,6 +70,32 @@ class DeviceUninstallTest(unittest.TestCase):
         self.assertIn(str(self.backups()[0]), result.stdout)
         self.assertEqual((self.backups()[0] / 'reading-data').read_bytes(), b'books-and-notes')
 
+    def test_comparison_errors_preserve_menu_and_report_failure(self):
+        for status in (2, 127):
+            with self.subTest(status=status):
+                command = self.shims / 'cmp'
+                command.write_text(f'#!/bin/sh\nexit {status}\n')
+                command.chmod(0o755)
+                result = self.run_uninstall()
+                self.assertNotEqual(result.returncode, 0)
+                self.assertEqual(self.entry.read_text(), 'owned menu\n')
+                self.assertNotIn('Menu entry was edited', result.stdout)
+                self.assertIn(f'cmp status {status}', result.stdout)
+                self.assertEqual(len(self.backups()), 1)
+                backup = self.backups()[0]
+                self.assertIn(str(backup), result.stdout)
+                self.assertEqual((backup / 'reading-data').read_bytes(), b'books-and-notes')
+                backup.rename(self.app)
+
+    def test_missing_comparison_source_reports_failure(self):
+        (self.app / 'nickelmenu.conf').unlink()
+        result = self.run_uninstall()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertTrue(self.entry.is_file())
+        self.assertNotIn('Menu entry was edited', result.stdout)
+        self.assertEqual(len(self.backups()), 1)
+        self.assertIn(str(self.backups()[0]), result.stdout)
+
     def test_edited_menu_is_preserved(self):
         self.entry.write_text('custom user menu\n')
         result = self.run_uninstall()

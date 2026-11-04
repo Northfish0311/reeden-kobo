@@ -18,6 +18,12 @@ if [ -f "$ENTRY" ]; then
             exit 1
         fi
     else
+        CMP_STATUS=$?
+        if [ "$CMP_STATUS" -ne 1 ]; then
+            echo "App and all reading data preserved at: $DEST"
+            echo "Could not compare menu entry (cmp status $CMP_STATUS); kept it: $ENTRY"
+            exit 1
+        fi
         echo 'Menu entry was edited; preserved it. Remove your Reeden entry manually.'
     fi
 fi

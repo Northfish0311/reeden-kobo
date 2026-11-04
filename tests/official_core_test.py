@@ -42,6 +42,9 @@ class OfficialCoreTest(unittest.TestCase):
         files = {
             'lib/libapp.so': b'synthetic-app',
             'lib/libflutter_engine.so': b'synthetic-engine',
+            'lib/glibc/reeden-kindle': b'synthetic-loader',
+            'lib/glibc/libc.so.6': b'synthetic-libc',
+            'THIRD_PARTY_NOTICES.txt': b'synthetic-notices',
             'lib/glibc/ld-linux.so': b'synthetic-runtime',
             'licenses/NOTICE': b'synthetic-license',
             'data/icudtl.dat': b'synthetic-icu',
@@ -250,6 +253,56 @@ class OfficialCoreTest(unittest.TestCase):
             (self.core / 'data/flutter_assets/assets/test.ttf').unlink()
             with self.assertRaisesRegex(ValueError, '字体'):
                 install.validate_official_core(self.core)
+
+    def use_780(self):
+        (self.core / 'data/flutter_assets/version.json').write_text(
+            '{"version":"1.43.1","build_number":"780"}', encoding='utf-8')
+        patch = mock.patch.object(install, 'SUPPORTED_CORES', {'1.43.1+780': self.hashes})
+        patch.start()
+        self.addCleanup(patch.stop)
+
+    def assert_candidate_skipped(self):
+        with mock.patch.object(install, 'discover_official_inputs',
+                               return_value=[self.core, self.valid_zip]):
+            core, version = install.resolve_official_core(None, self.extract)
+        self.assertEqual(version, '1.43.1+780')
+        self.assertNotEqual(core, self.core)
+        self.assertEqual(len(list(self.extract.iterdir())), 1)
+
+    def test_780_missing_or_empty_assembly_files_do_not_hide_valid_candidate(self):
+        self.use_780()
+        self.make_zip(self.valid_zip)
+        for rel in ('THIRD_PARTY_NOTICES.txt', 'lib/glibc/reeden-kindle',
+                    'lib/glibc/libc.so.6'):
+            path = self.core / rel
+            original = path.read_bytes()
+            for missing in (True, False):
+                with self.subTest(path=rel, missing=missing):
+                    if missing:
+                        path.unlink()
+                    else:
+                        path.write_bytes(b'')
+                    with self.assertRaisesRegex(ValueError, '必需文件'):
+                        install.validate_official_core(self.core)
+                    self.assert_candidate_skipped()
+                    for extracted in self.extract.iterdir():
+                        install.shutil.rmtree(extracted)
+                    path.write_bytes(original)
+
+    def test_780_malformed_font_shapes_do_not_abort_candidate_search(self):
+        self.use_780()
+        self.make_zip(self.valid_zip)
+        path = self.core / 'data/flutter_assets/FontManifest.json'
+        for malformed in (None, {}, 7, [None], [{}], [{'fonts': None}],
+                          [{'fonts': [None]}], [{'fonts': [{'asset': None}]}],
+                          [{'fonts': [{'asset': 7}]}]):
+            with self.subTest(manifest=malformed):
+                path.write_text(json.dumps(malformed), encoding='utf-8')
+                with self.assertRaisesRegex(ValueError, '字体'):
+                    install.validate_official_core(self.core)
+                self.assert_candidate_skipped()
+                for extracted in self.extract.iterdir():
+                    install.shutil.rmtree(extracted)
 
     def test_conflicting_explicit_options_fail(self):
         with self.assertRaisesRegex(ValueError, '不能同时'):
