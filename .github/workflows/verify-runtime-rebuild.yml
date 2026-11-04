@@ -1,0 +1,46 @@
+name: Verify Kobo runtime rebuild
+on:
+  push:
+    branches: [build/verify-kobo-runtime-077]
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+      - name: Runtime recovery and display fault injection
+        run: |
+          python3 tests/session_recovery_test.py
+          python3 tests/launcher_test.py
+          python3 tests/wake_guard_test.py
+          python3 tests/power_guard_test.py
+          python3 tests/native_network_test.py
+          cc -O2 -Iinclude -Isrc tests/display_transaction_test.c src/refresh_policy.c src/turn_timing.c src/frame_evidence.c -pthread -o /tmp/display-test
+          /tmp/display-test
+      - name: Verified upstream ARMHF build
+        run: |
+          curl -fL --retry 3 https://ziglang.org/download/0.13.0/zig-linux-x86_64-0.13.0.tar.xz -o /tmp/zig.tar.xz
+          echo 'd45312e61ebcc48032b77bc4cf7fd6915c11fa16e4aad116b66c9468211230ea  /tmp/zig.tar.xz' | sha256sum -c -
+          tar xf /tmp/zig.tar.xz -C /tmp
+          ZIG=/tmp/zig-linux-x86_64-0.13.0/zig sh scripts/build.sh
+          for f in prebuilt/checks/*-armhf; do
+            case "$f" in */display-transaction-test-armhf) continue;; esac
+            cmp "build/$(basename "$f")" "$f"
+          done
+          cmp package/lib/libreeden_kobo_compat.so prebuilt/lib/libreeden_kobo_compat.so
+          mkdir -p bundle/bin bundle/checks
+          cp package/bin/fb-guard package/bin/reeden-kindle bundle/bin/
+          cp build/display-transaction-test-armhf bundle/checks/
+          git rev-parse HEAD^ > bundle/SOURCE
+          (cd bundle && sha256sum bin/* checks/* SOURCE > SHA256SUMS)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: checked-armhf
+          path: bundle/
+          retention-days: 3
+          if-no-files-found: error
