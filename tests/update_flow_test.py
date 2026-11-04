@@ -8,8 +8,6 @@ from pathlib import Path
 import tempfile
 import unittest
 from unittest import mock
-import urllib.error
-import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location('installer', ROOT / 'install.py')
@@ -62,7 +60,8 @@ class UpdateTests(unittest.TestCase):
 
     def test_update_automates_flags_and_preserves_data_and_backup(self):
         self.assertEqual(self.run_main(['--update']), 0)
-        self.assertTrue(self.resolve.call_args.kwargs['auto_download'])
+        self.assertFalse(self.resolve.call_args.kwargs['auto_download'])
+        self.assertTrue(self.resolve.call_args.kwargs['download_missing'])
         self.assertTrue(self.write.call_args.kwargs['allow_upgrade'])
         self.assertEqual((self.installed / 'payload').read_bytes(), b'new-version')
         backups = list((self.mount / '.adds').glob('reeden-kobo-backup-*'))
@@ -136,63 +135,25 @@ class UpdateTests(unittest.TestCase):
         self.assertEqual((self.installed / 'payload').read_bytes(), b'old-version')
 
 
-class DownloadTests(unittest.TestCase):
-    def setUp(self):
-        temp = tempfile.TemporaryDirectory(prefix='reeden-download-')
-        self.addCleanup(temp.cleanup)
-        self.base = Path(temp.name)
-        self.tool = self.base / 'tool'
-        self.tool.mkdir()
-        self.work = self.base / 'work'
-        self.work.mkdir()
-        self.cache = self.tool / 'cache/Reeden-kindle.zip'
-        self.hashes = {}
-        buf = io.BytesIO()
-        with zipfile.ZipFile(buf, 'w') as archive:
-            for name in ['libflutter_engine.so', 'libapp.so']:
-                data = name.encode('ascii')
-                self.hashes[name] = hashlib.sha256(data).hexdigest()
-                archive.writestr('reeden/lib/' + name, data)
-            for directory in ['data/flutter_assets/', 'lib/glibc/', 'licenses/']:
-                archive.writestr('reeden/' + directory, b'')
-        self.zip_bytes = buf.getvalue()
+class UpdateCoreSelectionTests(unittest.TestCase):
+    def test_download_only_when_no_verified_local_copy(self):
+        for found in (True, False):
+            with self.subTest(local=found), ExitStack() as stack:
+                core = (Path('fixture'), '1.43.2+791')
+                stack.enter_context(mock.patch.object(installer, 'discover_official_inputs',
+                                                      return_value=[Path('local.zip')] if found else []))
+                stack.enter_context(mock.patch.object(installer, 'load_official_input', return_value=core))
+                download = stack.enter_context(mock.patch.object(installer, 'download_official_core', return_value=core))
+                stack.enter_context(mock.patch('builtins.input', side_effect=AssertionError('unexpected prompt')))
+                self.assertEqual(installer.resolve_official_core(None, Path('.'), download_missing=True), core)
+                self.assertEqual(download.call_count, int(not found))
 
-    def resolve(self, response, hashes=None):
-        with mock.patch.object(installer, 'ROOT', self.tool), \
-             mock.patch.object(installer, 'auto_discover_official_input', return_value=None), \
-             mock.patch.object(installer, 'SUPPORTED_CORES', {'test': self.hashes if hashes is None else hashes}), \
-             mock.patch.object(installer, 'open_url_with_cert_fallback', return_value=response), \
-             redirect_stdout(io.StringIO()):
-            return installer.resolve_official_core(None, self.work, auto_download=True)
-
-    def test_interrupted_download_never_becomes_a_cache_entry_and_can_retry(self):
-        class BrokenResponse(io.BytesIO):
-            def read(self, size=-1):
-                if self.tell():
-                    raise urllib.error.URLError('interrupted')
-                return super().read(4)
-        with self.assertRaises(urllib.error.URLError):
-            self.resolve(BrokenResponse(self.zip_bytes))
-        self.assertFalse(self.cache.exists())
-        _, version = self.resolve(io.BytesIO(self.zip_bytes))
-        self.assertEqual(version, 'test')
-        self.assertEqual(self.cache.read_bytes(), self.zip_bytes)
-
-    def test_unsupported_core_does_not_replace_existing_cache(self):
-        self.cache.parent.mkdir()
-        self.cache.write_bytes(b'existing-cache')
-        with self.assertRaises(ValueError):
-            self.resolve(io.BytesIO(self.zip_bytes), hashes={})
-        self.assertEqual(self.cache.read_bytes(), b'existing-cache')
-
-    def test_cache_promotion_failure_preserves_previous_file(self):
-        self.cache.parent.mkdir()
-        self.cache.write_bytes(b'existing-cache')
-        with mock.patch.object(installer.os, 'replace', side_effect=OSError('promotion failed')):
-            with self.assertRaises(OSError):
-                self.resolve(io.BytesIO(self.zip_bytes))
-        self.assertEqual(self.cache.read_bytes(), b'existing-cache')
-        self.assertEqual(list(self.cache.parent.glob('*.part')), [])
+    def test_explicit_bad_core_never_falls_back(self):
+        with mock.patch.object(installer, 'load_official_input', side_effect=ValueError('bad core')), \
+             mock.patch.object(installer, 'download_official_core') as download:
+            with self.assertRaisesRegex(ValueError, 'bad core'):
+                installer.resolve_official_core('chosen.zip', Path('.'), download_missing=True)
+            download.assert_not_called()
 
 
 if __name__ == '__main__':
