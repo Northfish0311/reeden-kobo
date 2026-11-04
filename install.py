@@ -23,6 +23,7 @@ import ssl
 import stat
 import subprocess
 import sys
+import time
 if sys.version_info < (3, 10):
     sys.exit('需要 Python 3.10 或更新版本，请升级 Python 后重新运行安装器。')
 import tarfile
@@ -845,6 +846,13 @@ def main() -> int:
         mount = pathlib.Path(args.kobo_mount).expanduser().resolve()
     elif args.usb or args.check or automatic_usb:
         mounts = detect_kobo_usb_mounts()
+        if not mounts and args.update and sys.stdin.isatty():
+            print('正在等待 Kobo。请插入 USB 数据线，在阅读器上点“连接”。最多等待约 1 分钟；按 Ctrl+C 可取消。', flush=True)
+            for _ in range(30):
+                time.sleep(2)
+                mounts = detect_kobo_usb_mounts()
+                if mounts:
+                    break
         if mounts or args.usb or args.check:
             mount = choose_kobo_usb_mount(mounts)
     if mount is not None:
@@ -860,6 +868,13 @@ def main() -> int:
         if args.update:
             print(f'即将更新到本下载包中的适配层 {PORT_VERSION}，自动保留书库、笔记、进度及旧版备份。')
     if args.check:
+        app_dir = mount / '.adds/reeden-kobo'
+        if app_dir.is_dir():
+            print('已发现安装目录：要升级，请运行“一键更新”。')
+        elif app_dir.exists():
+            raise RuntimeError('安装路径不是目录，请先检查设备文件；不要直接覆盖。')
+        else:
+            print('未发现安装目录：首次使用请运行“一键安装”。')
         print('只读基础检查完成：未联网、未组包、未写入设备。')
         print('此检查不验证屏幕效果、固件兼容性或完整安装空间；实际安装前仍会重新检查设备及所需空间。')
         return 0
