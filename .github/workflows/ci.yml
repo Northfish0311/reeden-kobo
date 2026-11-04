@@ -88,6 +88,8 @@ jobs:
           python tests/oneclick_installer_test.py
           python tests/uninstall_test.py
           python tests/archive_security_test.py
+          python tests/official_core_test.py
+          python tests/device_uninstall_test.py
           python tests/desktop_launcher_test.py
           python install.py --help
           python uninstall.py --help

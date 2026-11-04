@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Reeden Kobo (0.7.5) One-Click Builder & Installer.
+"""Reeden Kobo (0.7.6) One-Click Builder & Installer.
 
 Combines the verified MIT Kobo compatibility layer with the user's unmodified
 official Reeden Kindle 1.43.1+780 or 1.43.2+791 core and pinned Debian Bullseye ARMHF runtime
@@ -12,6 +12,7 @@ requiring Zig, fontTools, ar, or external tar binaries.
 import argparse
 import datetime
 import hashlib
+import http.client
 import io
 import json
 import os
@@ -27,9 +28,11 @@ if sys.version_info < (3, 10):
     sys.exit('需要 Python 3.10 或更新版本，请升级 Python 后重新运行安装器。')
 import tarfile
 import tempfile
+import time
 import urllib.error
 import urllib.request
 import zipfile
+import zlib
 
 ROOT = pathlib.Path(__file__).resolve().parent
 SUPPORTED_CORES = {
@@ -43,7 +46,7 @@ SUPPORTED_CORES = {
     },
 }
 OFFICIAL_LATEST_URL = 'https://download.reeden.app/Reeden/latest/Reeden-kindle.zip'
-PORT_VERSION = '0.7.5-experimental'
+PORT_VERSION = '0.7.6-experimental'
 SUPPORTED_PRODUCT = '393'
 
 
@@ -119,15 +122,12 @@ def find_core_dir_in(base: pathlib.Path) -> pathlib.Path | None:
     return None
 
 
-def auto_discover_official_input(root: pathlib.Path) -> pathlib.Path | None:
+def discover_official_inputs(root: pathlib.Path) -> list[pathlib.Path]:
+    """Enumerate candidates in priority order; validation happens before selection."""
     env_core = os.environ.get('REEDEN_OFFICIAL_CORE', '').strip()
-    if env_core:
-        p = pathlib.Path(env_core).expanduser()
-        if p.exists():
-            return p
     home = pathlib.Path.home()
     cwd = pathlib.Path.cwd()
-    search_paths = [
+    search_paths = ([pathlib.Path(env_core).expanduser()] if env_core else []) + [
         root / 'Reeden-kindle.zip',
         cwd / 'Reeden-kindle.zip',
         root / 'cache' / 'Reeden-kindle.zip',
@@ -137,21 +137,23 @@ def auto_discover_official_input(root: pathlib.Path) -> pathlib.Path | None:
         home / 'Downloads' / 'reeden' / 'reeden',
         home / 'Desktop' / 'Reeden-kindle.zip',
     ]
-    for p in search_paths:
-        if p.exists():
-            return p
-    # Also match browser-renamed downloads such as "Reeden-kindle (1).zip"
+    # Include browser-renamed downloads, but never unfinished .part files.
     for folder in (root, cwd, home / 'Downloads', home / 'Desktop'):
-        if not folder.is_dir():
-            continue
         try:
             for item in sorted(folder.iterdir()):
                 low = item.name.lower()
                 if item.is_file() and low.startswith('reeden') and 'kindle' in low and low.endswith('.zip'):
-                    return item
+                    search_paths.append(item)
         except OSError:
             continue
-    return None
+    candidates = []
+    seen = set()
+    for path in search_paths:
+        key = path.absolute()
+        if key not in seen and path.exists():
+            seen.add(key)
+            candidates.append(path)
+    return candidates
 
 
 def clean_dragged_path(raw: str) -> pathlib.Path:
@@ -236,80 +238,150 @@ def extract_official_zip(archive: pathlib.Path, dest: pathlib.Path) -> None:
                     shutil.copyfileobj(src, out)
 
 
-def resolve_official_core(user_arg: str | None, temp_root: pathlib.Path, auto_download: bool = False) -> tuple[pathlib.Path, str]:
-    target: pathlib.Path | None = None
-    if user_arg:
-        target = pathlib.Path(user_arg).expanduser().resolve()
-    else:
-        target = auto_discover_official_input(ROOT)
-        if target is not None:
-            print(f'[1/4] 自动发现官方包: {target}')
-        elif auto_download:
-            cache_zip = ROOT / 'cache' / 'Reeden-kindle.zip'
-            cache_zip.parent.mkdir(parents=True, exist_ok=True)
-            print(f'[1/4] 正在从 Reeden 官网下载最新安装包 ({OFFICIAL_LATEST_URL}) ...')
-            req = urllib.request.Request(OFFICIAL_LATEST_URL, headers={'User-Agent': 'reeden-kobo-installer/0.7.5'})
-            with open_url_with_cert_fallback(req, timeout=180) as resp, cache_zip.open('wb') as out:
-                shutil.copyfileobj(resp, out)
-            target = cache_zip
-        elif sys.stdin.isatty():
-            print('\n未在当前目录或「下载」目录自动找到 Reeden-kindle.zip。')
-            print('支持官方版本：1.43.2+791 或 1.43.1+780（白名单以本安装器为准）')
-            entered = input('请将 Reeden-kindle.zip 拖入此窗口并按回车（直接按回车则自动从官网下载最新包）: ').strip()
-            if entered:
-                target = clean_dragged_path(entered).resolve()
-            else:
-                cache_zip = ROOT / 'cache' / 'Reeden-kindle.zip'
-                cache_zip.parent.mkdir(parents=True, exist_ok=True)
-                print(f'[1/4] 正在从 Reeden 官网下载最新安装包 ({OFFICIAL_LATEST_URL}) ...')
-                req = urllib.request.Request(OFFICIAL_LATEST_URL, headers={'User-Agent': 'reeden-kobo-installer/0.7.5'})
-                with open_url_with_cert_fallback(req, timeout=180) as resp, cache_zip.open('wb') as out:
-                    shutil.copyfileobj(resp, out)
-                target = cache_zip
-    if target is None or not target.exists():
-        raise FileNotFoundError(
-            '未找到官方 Reeden Kindle 安装包 (支持 1.43.2+791 或 1.43.1+780)。请将 Reeden-kindle.zip 放在同目录或系统「下载」文件夹，'
-            '或通过 --official-core 指定路径（也可加 --download-official 自动从官网下载）。'
-        )
-    if target.is_file() and zipfile.is_zipfile(target):
-        extract_dir = temp_root / 'official-extracted'
-        print(f'[1/4] 正在解压官方安装包 {target.name} ...')
-        extract_official_zip(target, extract_dir)
-        core_dir = find_core_dir_in(extract_dir)
-    else:
-        core_dir = find_core_dir_in(target)
-    if core_dir is None:
-        raise ValueError(f'在 {target} 中未找到包含 data/ 与 lib/ 的官方 reeden/reeden 目录')
+def validate_official_core(core_dir: pathlib.Path) -> str:
+    """Identify immutable core libraries, then verify the matching resources."""
     if core_dir.is_symlink():
         raise ValueError('官方核心目录不允许符号链接')
+    files = {}
     for path in core_dir.rglob('*'):
-        archive_parts(path.relative_to(core_dir).as_posix())
+        rel = path.relative_to(core_dir).as_posix()
+        archive_parts(rel)
         if path.is_symlink() or not (path.is_file() or path.is_dir()):
             raise ValueError('官方核心目录含链接或特殊文件，已拒绝组包')
-
-    actual_hashes = {}
-    for name in ('libflutter_engine.so', 'libapp.so'):
-        lib_path = core_dir / 'lib' / name
-        if not lib_path.is_file():
-            raise FileNotFoundError(f'缺少官方核心文件: {lib_path}')
-        actual_hashes[name] = sha256_file(lib_path)
-
+        if path.is_file():
+            files[rel] = path
+    validate_archive_layout([(tuple(rel.split('/')), False) for rel in files])
+    actual_hashes = {name: sha256_file(core_dir / 'lib' / name)
+                     for name in ('libflutter_engine.so', 'libapp.so')}
     matched_version = next(
-        (ver for ver, expected in SUPPORTED_CORES.items() if actual_hashes == expected),
-        None,
+        (ver for ver, expected in SUPPORTED_CORES.items() if actual_hashes == expected), None,
     )
     if matched_version is None:
-        supported_str = ' / '.join(SUPPORTED_CORES.keys())
-        raise ValueError(
-            f'官方核心版本不在已验证白名单内 (当前支持: {supported_str})。\n'
-            f'实测 libflutter_engine.so={actual_hashes["libflutter_engine.so"][:12]}..., '
-            f'libapp.so={actual_hashes["libapp.so"][:12]}...'
-        )
+        raise ValueError('官方核心版本不在已验证白名单内 (当前支持: '
+                         + ' / '.join(SUPPORTED_CORES) + ')。请提供受支持的官方包。')
     for rel in ('data/flutter_assets', 'lib/glibc', 'licenses'):
         if not (core_dir / rel).is_dir():
-            raise FileNotFoundError(f'缺少官方子目录: {core_dir / rel}')
-    print(f'[1/4] 官方 Reeden {matched_version} 核心 SHA-256 校验通过（原字节未修改）')
-    return core_dir, matched_version
+            raise FileNotFoundError(f'缺少官方子目录: {rel}')
+    manifest = ROOT / 'vendor' / f'official-core-{matched_version}.sha256'
+    if matched_version == '1.43.2+791':
+        # A missing manifest is an installation error, never a weaker fallback.
+        expected = {}
+        for line in manifest.read_text(encoding='utf-8').splitlines():
+            digest, rel = line.split('  ', 1)
+            archive_parts(rel)
+            if len(digest) != 64 or any(c not in '0123456789abcdef' for c in digest) or rel in expected:
+                raise ValueError('官方核心 SHA 清单无效')
+            expected[rel] = digest
+        if not expected or files.keys() != expected.keys():
+            raise ValueError('官方核心文件集合与 SHA 清单不一致（缺失或多余文件）')
+        for rel, digest in expected.items():
+            if sha256_file(files[rel]) != digest:
+                raise ValueError(f'官方核心文件哈希不匹配: {rel}')
+    else:
+        # Keep the existing 780 library allowlist until an official full fixture
+        # is available. Do not substitute 791 resource hashes for this version.
+        assets = core_dir / 'data/flutter_assets'
+        version = json.loads((assets / 'version.json').read_text(encoding='utf-8'))
+        if f'{version.get("version")}+{version.get("build_number")}' != matched_version:
+            raise ValueError('官方资源版本与核心库不匹配')
+        for rel in ('data/icudtl.dat', 'data/flutter_assets/AssetManifest.bin',
+                    'data/flutter_assets/FontManifest.json'):
+            if not (core_dir / rel).is_file() or (core_dir / rel).stat().st_size == 0:
+                raise ValueError(f'官方资源文件缺失或为空: {rel}')
+        for font in json.loads((assets / 'FontManifest.json').read_text(encoding='utf-8')):
+            for face in font['fonts']:
+                parts = archive_parts(face['asset'])
+                if not assets.joinpath(*parts).is_file():
+                    raise ValueError(f'官方字体资源缺失: {face["asset"]}')
+        for path in (core_dir / 'lib').glob('glibc*/data/flutter_assets/version.json'):
+            if json.loads(path.read_text(encoding='utf-8')) != version:
+                raise ValueError('官方随包运行库资源版本不匹配')
+        print('[1/4] 注意：780 仅验证两库白名单、版本与资源结构，尚无官方全文件 SHA 清单。')
+    return matched_version
+
+
+def load_official_input(target: pathlib.Path, temp_root: pathlib.Path) -> tuple[pathlib.Path, str]:
+    if not target.exists():
+        raise FileNotFoundError(f'未找到官方包: {target}')
+    if target.is_file():
+        # Each attempt has its own extraction tree; never mix failed candidates.
+        extract_dir = pathlib.Path(tempfile.mkdtemp(prefix='official-', dir=temp_root))
+        try:
+            extract_official_zip(target, extract_dir)
+            core_dir = find_core_dir_in(extract_dir)
+            if core_dir is None:
+                raise ValueError('官方 ZIP 缺少核心目录')
+            version = validate_official_core(core_dir)
+        except Exception:
+            shutil.rmtree(extract_dir)
+            raise
+    else:
+        core_dir = find_core_dir_in(target)
+        if core_dir is None:
+            raise ValueError('未找到官方核心目录')
+        version = validate_official_core(core_dir)
+    return core_dir, version
+
+
+def download_official_core(temp_root: pathlib.Path) -> tuple[pathlib.Path, str]:
+    """Commit only a fully verified download; preserve any existing cache."""
+    cache_zip = ROOT / 'cache' / 'Reeden-kindle.zip'
+    cache_zip.parent.mkdir(parents=True, exist_ok=True)
+    for attempt in range(3):
+        fd, name = tempfile.mkstemp(prefix='Reeden-kindle-', suffix='.part', dir=cache_zip.parent)
+        os.close(fd)
+        partial = pathlib.Path(name)
+        result = None
+        try:
+            print(f'[1/4] 正在从 Reeden 官网下载并校验 ({OFFICIAL_LATEST_URL}, {attempt + 1}/3) ...')
+            req = urllib.request.Request(OFFICIAL_LATEST_URL, headers={'User-Agent': 'reeden-kobo-installer/0.7.6'})
+            with open_url_with_cert_fallback(req, timeout=180) as resp, partial.open('wb') as out:
+                shutil.copyfileobj(resp, out)
+                expected_size = resp.headers.get('Content-Length')
+                if expected_size is not None and out.tell() != int(expected_size):
+                    raise OSError('官方下载不完整（Content-Length 不符）')
+            result = load_official_input(partial, temp_root)
+            os.replace(partial, cache_zip)
+            return result
+        except (OSError, EOFError, http.client.HTTPException, zipfile.BadZipFile, zlib.error) as exc:
+            if result is not None:
+                extracted = temp_root / result[0].relative_to(temp_root).parts[0]
+                shutil.rmtree(extracted)
+            if attempt == 2:
+                raise RuntimeError('官方下载失败，原缓存未更改；请重试或用 --official-core 指定受支持的官方包。') from exc
+            print(f'[1/4] 下载未完成，稍后重试: {exc}')
+            time.sleep(attempt + 1)
+        finally:
+            partial.unlink(missing_ok=True)
+    raise AssertionError('unreachable')
+
+
+def resolve_official_core(user_arg: str | None, temp_root: pathlib.Path, auto_download: bool = False) -> tuple[pathlib.Path, str]:
+    if user_arg and auto_download:
+        raise ValueError('--official-core 与 --download-official 不能同时使用')
+    if user_arg:
+        result = load_official_input(pathlib.Path(user_arg).expanduser().absolute(), temp_root)
+    elif auto_download:
+        result = download_official_core(temp_root)
+    else:
+        result = None
+        for target in discover_official_inputs(ROOT):
+            try:
+                result = load_official_input(target, temp_root)
+            except (OSError, ValueError, EOFError, zipfile.BadZipFile, zlib.error, KeyError, TypeError) as exc:
+                print(f'[1/4] 跳过无效候选包 {target}: {exc}')
+                continue
+            print(f'[1/4] 自动选择已校验官方包: {target}')
+            break
+        if result is None and sys.stdin.isatty():
+            print('未找到已校验的官方包。支持版本：' + ' / '.join(SUPPORTED_CORES))
+            entered = input('拖入官方 ZIP 并回车（直接回车从官网下载并校验）: ').strip()
+            result = (load_official_input(clean_dragged_path(entered).absolute(), temp_root)
+                      if entered else download_official_core(temp_root))
+        if result is None:
+            raise FileNotFoundError('未找到有效官方包；请用 --official-core 指定受支持的官方包，或 --download-official 强制下载。')
+    print(f'[1/4] 官方 Reeden {result[1]} 核心校验通过（原字节未修改）')
+    return result
 
 
 def open_url_with_cert_fallback(req: urllib.request.Request, timeout: int = 60):
@@ -331,7 +403,7 @@ def download_verified(url: str, sha256: str, cache_dir: pathlib.Path, alt_dirs: 
     cache_dir.mkdir(parents=True, exist_ok=True)
     dest = cache_dir / filename
     print(f'      下载依赖: {filename} ...')
-    req = urllib.request.Request(url, headers={'User-Agent': 'reeden-kobo-installer/0.7.5'})
+    req = urllib.request.Request(url, headers={'User-Agent': 'reeden-kobo-installer/0.7.6'})
     with open_url_with_cert_fallback(req, timeout=60) as resp, dest.open('wb') as out:
         shutil.copyfileobj(resp, out)
     if sha256_file(dest) != sha256:
@@ -753,7 +825,7 @@ def main() -> int:
     parser.add_argument(
         '--download-official',
         action='store_true',
-        help='若本地未找到官方包，自动从 Reeden 官网下载最新 Reeden-kindle.zip 并校验',
+        help='强制从官网下载并校验官方 Kindle 包（不使用本地候选，与 --official-core 互斥）',
     )
     parser.add_argument(
         '--output',
