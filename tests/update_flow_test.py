@@ -46,10 +46,10 @@ class UpdateTests(unittest.TestCase):
         self.after_build()
         return 2
 
-    def run_main(self, args):
+    def run_main(self, args, scans=None):
         with ExitStack() as stack:
             stack.enter_context(mock.patch.object(installer.sys, 'argv', ['install.py', *args]))
-            stack.enter_context(mock.patch.object(installer, 'detect_kobo_usb_mounts', return_value=[self.mount]))
+            stack.enter_context(mock.patch.object(installer, 'detect_kobo_usb_mounts', return_value=[self.mount], side_effect=scans))
             self.verify = stack.enter_context(mock.patch.object(installer, 'verify_prebuilt', return_value=self.base))
             self.resolve = stack.enter_context(mock.patch.object(installer, 'resolve_official_core', return_value=(self.base, 'test')))
             stack.enter_context(mock.patch.object(installer, 'assemble_package', side_effect=self.assemble))
@@ -71,6 +71,28 @@ class UpdateTests(unittest.TestCase):
         for name in ['userdata/progress', 'storage/book.epub', 'userdata/kobo-light.conf', 'diagnostics/ssh/key']:
             self.assertEqual((self.installed / name).read_bytes(), (backups[0] / name).read_bytes())
         self.assertNotIn('PRIVATE-SERIAL', self.output.getvalue())
+
+    def test_interactive_update_waits_for_device(self):
+        with mock.patch.object(installer.sys.stdin, 'isatty', return_value=True), mock.patch.object(installer.time, 'sleep') as sleep:
+            self.assertEqual(self.run_main(['--update'], [[], [self.mount], [self.mount]]), 0)
+            sleep.assert_called_once_with(2)
+
+    def test_update_timeout_and_instant_check(self):
+        for args, waits in [(['--update'], 30), (['--check'], 0)]:
+            with mock.patch.object(installer.sys.stdin, 'isatty', return_value=True), mock.patch.object(installer.time, 'sleep') as sleep:
+                with self.assertRaises(RuntimeError):
+                    self.run_main(args, [[]] * (waits + 1))
+                self.assertEqual(sleep.call_count, waits)
+                self.resolve.assert_not_called()
+                self.write.assert_not_called()
+
+    def test_check_explains_next_step(self):
+        for expected in ['一键更新', '一键安装']:
+            self.assertEqual(self.run_main(['--check']), 0)
+            self.assertIn(expected, self.output.getvalue())
+            self.write.assert_not_called()
+            if self.installed.exists():
+                self.installed.rename(self.base / 'previous')
 
     def test_update_supports_explicit_mount_and_official_core(self):
         self.assertEqual(self.run_main(['--update', '--kobo-mount', str(self.mount), '--official-core', 'chosen.zip']), 0)
