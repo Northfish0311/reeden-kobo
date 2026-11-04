@@ -282,7 +282,7 @@ def validate_official_core(core_dir: pathlib.Path) -> str:
         # is available. Do not substitute 791 resource hashes for this version.
         assets = core_dir / 'data/flutter_assets'
         version = json.loads((assets / 'version.json').read_text(encoding='utf-8'))
-        if f'{version.get("version")}+{version.get("build_number")}' != matched_version:
+        if not isinstance(version, dict) or f'{version.get("version")}+{version.get("build_number")}' != matched_version:
             raise ValueError('官方资源版本与核心库不匹配')
         for rel in ('data/icudtl.dat', 'data/flutter_assets/AssetManifest.bin',
                     'data/flutter_assets/FontManifest.json'):

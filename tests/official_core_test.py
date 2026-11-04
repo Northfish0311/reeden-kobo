@@ -242,9 +242,10 @@ class OfficialCoreTest(unittest.TestCase):
         version.write_text('{"version":"1.43.1","build_number":"780"}', encoding='utf-8')
         with mock.patch.object(install, 'SUPPORTED_CORES', {'1.43.1+780': self.hashes}):
             self.assertEqual(install.validate_official_core(self.core), '1.43.1+780')
-            version.write_text('{"version":"1.43.2","build_number":"791"}', encoding='utf-8')
-            with self.assertRaisesRegex(ValueError, '版本'):
-                install.validate_official_core(self.core)
+            for invalid in ('[]', 'null', '{"version":"1.43.2","build_number":"791"}'):
+                version.write_text(invalid, encoding='utf-8')
+                with self.subTest(metadata=invalid), self.assertRaisesRegex(ValueError, '版本'):
+                    install.validate_official_core(self.core)
             version.write_text('{"version":"1.43.1","build_number":"780"}', encoding='utf-8')
             (self.core / 'data/flutter_assets/assets/test.ttf').unlink()
             with self.assertRaisesRegex(ValueError, '字体'):
