@@ -13,7 +13,7 @@
 
 ---
 
-# Reeden Kobo 兼容层 (0.7.5 Experimental)
+# Reeden Kobo 兼容层 (0.7.7 Experimental)
 
 在 **Kobo Clara Colour（产品代码 393）** 上原字节运行官方 **Reeden Kindle（同时支持 `1.43.2+791` 与 `1.43.1+780`）** 核心的开源 C 宿主与硬件兼容层。
 
@@ -21,11 +21,13 @@
 
 > **非官方 / Experimental**：这是社区兼容层，不是 Reeden 或 Kobo 官方产品，不代表官方支持或背书。运行时拥有设备 root 权限并控制硬件；开始前请备份重要书籍和笔记，不能保证断电、损坏或所有配置都可恢复。
 >
-> **下载与电脑要求**：[最新 v0.7.5 一键安装/卸载包](https://github.com/SSNQ/reeden-kobo/releases/tag/v0.7.5)，需要 **Python 3.10+**。固定的 Bullseye 依赖免费 LTS 已结束，哈希校验不是持续安全更新；见 [依赖维护方案](docs/依赖安全维护.md)。
+> **下载与电脑要求**：[最新 v0.7.7 一键安装/卸载包](https://github.com/SSNQ/reeden-kobo/releases/tag/v0.7.7)，需要 **Python 3.10+**。固定的 Bullseye 依赖免费 LTS 已结束，哈希校验不是持续安全更新；见 [依赖维护方案](docs/依赖安全维护.md)。
 
 ---
 
-## 当前主分支进展（2026-11-03）
+## 当前主分支进展（2026-11-04）
+
+v0.7.7 在 v0.7.6 下载恢复与核心校验修复的基础上，补齐 780 必需文件、字体清单与非空字体检查，并正确处理设备卸载时的菜单比较错误。791 继续使用全文件 SHA 清单；780 的验证边界见[本次发布说明](docs/releases/v0.7.7.md)。
 
 v0.7.5 已整合 Wi-Fi 桥接、夜间彩字分区刷新、翻页动画与文字残影诊断。开发细节见[刷新与翻页动画开发记录](docs/刷新与翻页动画开发记录.md)及[文字下缘横向拖影诊断](docs/文字下缘横向拖影诊断-20261102.md)。
 
@@ -38,7 +40,7 @@ v0.7.5 已整合 Wi-Fi 桥接、夜间彩字分区刷新、翻页动画与文字
 - 程序及阅读数据安装在用户分区 `.adds/reeden-kobo`，菜单在 `.adds/nm/reeden-kobo`。不替换固件、系统库或开机启动项，不设置开机自启。运行时需要控制屏幕、触摸、电源和网络；恢复网络时可能回写 `/etc/resolv.conf`，恢复 DNS。
 - 开始前备份重要书籍和笔记。升级会保留旧安装和数据副本，需要足够剩余空间；不要在 Reeden 运行期间升级，也不要在写入时拔线。
 - 默认菜单不再提供开启 SSH 的入口，只保留 **Reeden SSH - Stop** 以便关闭旧版监听服务。可选诊断工具仅允许密钥认证，见 [SSH 说明](docs/SSH.md)。升级不自动终止现有 SSH 会话，旧服务需手动停止或重启设备。
-- [下载 v0.7.5 安装包](https://github.com/SSNQ/reeden-kobo/releases/tag/v0.7.5)。v0.7.3 及以前已被替代；不要混用旧标签自动生成的源码包和新版附件。
+- [下载 v0.7.7 安装包](https://github.com/SSNQ/reeden-kobo/releases/tag/v0.7.7)。v0.7.3 及以前已被替代；不要混用旧标签自动生成的源码包和新版附件。
 
 ### 退出和故障恢复
 
@@ -95,7 +97,7 @@ v0.7.5 已整合 Wi-Fi 桥接、夜间彩字分区刷新、翻页动画与文字
    - **Windows**：双击 `一键安装-Windows.bat`
    - **Linux / 终端**：运行 `python3 install.py --usb`（若已安装旧版需保留书库与阅读进度升级，可加 `--upgrade`，交互模式下会自动识别并保留数据）
 3. 脚本会自动完成：
-   - 校验官方 `Reeden-kindle.zip`（`libflutter_engine.so` 与 `libapp.so` SHA-256）
+   - 校验官方 `Reeden-kindle.zip`：791 核对全部 243 个文件的 SHA-256 及精确文件集合；780 核对两库白名单、版本元数据、必要资源和字体引用（尚无全文件清单）
    - 下载并校验 10 个固定版本的 Debian Bullseye ARMHF 运行库与 Mozilla 根证书
    - 合成 `ui-assets` 中文字体与数学符号覆盖层
    - 校验 Kobo 机型码（`393`），将清单中的全部文件写入 `.adds/reeden-kobo` 并逐文件校验 SHA-256（升级时自动备份旧版并保留 `userdata/` 阅读进度、笔记、冷暖光设置及 `storage/` 书库）
