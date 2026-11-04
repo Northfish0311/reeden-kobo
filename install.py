@@ -273,6 +273,9 @@ def validate_official_core(core_dir: pathlib.Path) -> str:
                 raise ValueError('官方核心 SHA 清单无效')
             expected[rel] = digest
         if not expected or files.keys() != expected.keys():
+            if any(pathlib.PurePosixPath(rel).name == '.DS_Store' or
+                   pathlib.PurePosixPath(rel).name.startswith('._') for rel in files.keys() - expected.keys()):
+                raise ValueError('官方核心目录含 Finder 附加文件；请直接选择未解压的原始 Reeden-kindle.zip。')
             raise ValueError('官方核心文件集合与 SHA 清单不一致（缺失或多余文件）')
         for rel, digest in expected.items():
             if sha256_file(files[rel]) != digest:
@@ -729,6 +732,7 @@ def install_to_usb_mount(pkg_dir: pathlib.Path, mount: pathlib.Path, allow_upgra
     menu_stage = None
     backup = None
     promoted = False
+    menu_replaced = False
     try:
         menu_fd, menu_name = tempfile.mkstemp(prefix='.reeden-kobo-menu-', dir=nm_dir)
         os.close(menu_fd)
@@ -757,8 +761,16 @@ def install_to_usb_mount(pkg_dir: pathlib.Path, mount: pathlib.Path, allow_upgra
             dest.rename(backup)
         stage.rename(dest)
         promoted = True
-        # Replace the menu only after promotion, in the same filesystem.
-        os.replace(menu_stage, entry)
+        # The live entry is external to the app backup; replace only a stock menu.
+        previous_menu = backup / 'nickelmenu.conf' if backup is not None else None
+        if entry.is_symlink() or (entry.exists() and not entry.is_file()):
+            raise RuntimeError('菜单路径不是普通文件，未覆盖。')
+        if entry.exists() and (previous_menu is None or previous_menu.is_symlink() or
+                               not previous_menu.is_file() or sha256_file(entry) != sha256_file(previous_menu)):
+            print('已保留自定义菜单；新版默认菜单在 .adds/reeden-kobo/nickelmenu.conf，可自行对照。')
+        else:
+            os.replace(menu_stage, entry)
+            menu_replaced = True
     except BaseException:
         try:
             if promoted:
@@ -776,7 +788,8 @@ def install_to_usb_mount(pkg_dir: pathlib.Path, mount: pathlib.Path, allow_upgra
             except OSError:
                 print(f'提示：临时菜单文件未能清理: {menu_stage}')
     try:
-        cleanup_appledouble(nm_dir / '._reeden-kobo')
+        if menu_replaced:
+            cleanup_appledouble(nm_dir / '._reeden-kobo')
     except OSError:
         print('提示：安装已完成，macOS 元数据文件需在弹出前手动清理。')
     if backup is not None:
@@ -1011,7 +1024,7 @@ def main() -> int:
             mode_label = '保留书库与进度升级' if has_existing else '全新安装'
             if sys.stdin.isatty():
                 ans = input(f'\n检测到已通过 USB 挂载的 Kobo ({mount})，按回车立即【{mode_label}】(输入 n 取消): ').strip().lower()
-                if ans in ('n', 'no', 'q'):
+                if ans not in ('', 'y', 'yes', '是', '确认'):
                     print('已取消设备安装。')
                     return 0
             install_to_usb_mount(pkg_dir, mount, allow_upgrade=True if has_existing else args.upgrade)
@@ -1024,7 +1037,10 @@ def main() -> int:
             print('  [3] 仅在当前目录生成 package/ 安装包文件夹')
             choice = input('请输入序号 [1/2/3，默认 1]: ').strip() or '1'
             if choice == '1':
-                input('请用 USB 线将 Kobo 连接到电脑并点击 Kobo 屏幕上的「连接」，电脑出现 KOBOeReader 盘后按回车...')
+                ans = input('在 Kobo 屏幕点「连接」，出现 USB 盘后按回车继续；输入其他文字取消：').strip()
+                if ans:
+                    print('已取消设备安装。')
+                    return 0
                 mounts = detect_kobo_usb_mounts()
                 if not mounts:
                     raise RuntimeError('仍未检测到 KOBOeReader USB 盘，请确认连接后重试。')
@@ -1045,6 +1061,10 @@ def main() -> int:
                     password_auth=args.password_auth,
                     temp_root=temp_root,
                 )
+                return 0
+
+            if choice != '3':
+                print('已取消设备安装。')
                 return 0
 
         fallback_out = ROOT / 'package'

@@ -44,7 +44,7 @@ class UpdateTests(unittest.TestCase):
         self.after_build()
         return 2
 
-    def run_main(self, args, scans=None):
+    def run_main(self, args, scans=None, answers=None):
         with ExitStack() as stack:
             stack.enter_context(mock.patch.object(installer.sys, 'argv', ['install.py', *args]))
             stack.enter_context(mock.patch.object(installer, 'detect_kobo_usb_mounts', return_value=[self.mount], side_effect=scans))
@@ -52,7 +52,8 @@ class UpdateTests(unittest.TestCase):
             self.resolve = stack.enter_context(mock.patch.object(installer, 'resolve_official_core', return_value=(self.base, 'test')))
             stack.enter_context(mock.patch.object(installer, 'assemble_package', side_effect=self.assemble))
             self.write = stack.enter_context(mock.patch.object(installer, 'install_to_usb_mount', wraps=installer.install_to_usb_mount))
-            stack.enter_context(mock.patch('builtins.input', side_effect=AssertionError('unexpected prompt')))
+            stack.enter_context(mock.patch('builtins.input', side_effect=answers if answers is not None
+                                          else AssertionError('unexpected prompt')))
             self.output = io.StringIO()
             stack.enter_context(redirect_stdout(self.output))
             stack.enter_context(redirect_stderr(self.output))
@@ -75,6 +76,26 @@ class UpdateTests(unittest.TestCase):
         with mock.patch.object(installer.sys.stdin, 'isatty', return_value=True), mock.patch.object(installer.time, 'sleep') as sleep:
             self.assertEqual(self.run_main(['--update'], [[], [self.mount], [self.mount]]), 0)
             sleep.assert_called_once_with(2)
+
+    def test_cancel_never_writes_present_or_late_device(self):
+        with mock.patch.object(installer.sys.stdin, 'isatty', return_value=True):
+            for answer in ('取消', 'no', 'typo'):
+                self.assertEqual(self.run_main([], answers=[answer]), 0)
+                self.write.assert_not_called()
+            self.assertEqual(self.run_main([], scans=[[], []], answers=['1', '取消']), 0)
+            self.write.assert_not_called()
+
+    def test_custom_menu_is_preserved_and_stock_menu_is_updated(self):
+        entry = self.mount / '.adds/nm/reeden-kobo'
+        (self.installed / 'nickelmenu.conf').write_bytes(b'old stock menu')
+        entry.write_bytes(b'my commands')
+        self.assertEqual(self.run_main(['--update']), 0)
+        self.assertEqual(entry.read_bytes(), b'my commands')
+        self.assertEqual((self.installed / 'nickelmenu.conf').read_bytes(), b'new-menu\n')
+        (self.installed / 'nickelmenu.conf').write_bytes(b'old stock menu')
+        entry.write_bytes(b'old stock menu')
+        self.assertEqual(self.run_main(['--update']), 0)
+        self.assertEqual(entry.read_bytes(), b'new-menu\n')
 
     def test_update_timeout_and_instant_check(self):
         for args, waits in [(['--update'], 30), (['--check'], 0)]:
