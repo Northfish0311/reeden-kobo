@@ -1,15 +1,15 @@
 # Reeden Kobo 社区改进分支
 
-本仓库是 **Northfish0311** 基于 [SSNQ/reeden-kobo](https://github.com/SSNQ/reeden-kobo) 的社区 Fork。Kobo 适配层及下文历史成果来自原项目；本分支增加 USB 安装预检查、只读 `--check` 模式和保留数据的一键更新入口，不是重新开发的阅读器。
+本仓库基于 **SSNQ** 的 [Reeden Kobo](https://github.com/SSNQ/reeden-kobo)。当前社区版 **v0.7.7-community.1** 在原作者 v0.7.7 上改进了安装、更新、锁屏和异常恢复，面向 **Kobo Clara Colour（393）**。
 
 **非官方、实验性项目。** 不代表 SSNQ 已接受本分支修改，也不代表 Reeden 或 Kobo 官方支持、授权合作或产品背书。原作者署名、MIT 许可证及第三方许可声明均予保留；不附带 Reeden 官方闭源核心，不修改其账号、付费或授权逻辑。详情见 [来源、修改范围与风险声明](docs/FORK-NOTES.md)。
 
-- **使用本分支：** [下载本分支 ZIP](https://github.com/Northfish0311/reeden-kobo/archive/refs/heads/main.zip)，完整解压。电脑需 Python 3.10+；先连接 Kobo 并在设备上点“连接”，在解压目录运行 `python install.py --check`（macOS/Linux 使用 `python3`）。检查通过后再按 [安装说明](docs/安装与卸载.md) 运行对应的一键安装脚本。安装前备份书库和笔记。
+- **下载：** 在[社区版下载页](https://github.com/Northfish0311/reeden-kobo/releases/tag/v0.7.7-community.1)选择文件名以 **OneClick.zip** 结尾的附件并完整解压；也可[下载本版本的代码包](https://github.com/Northfish0311/reeden-kobo/archive/refs/tags/v0.7.7-community.1.zip)。电脑需 Python 3.10+，Kobo 需已安装 NickelMenu。先备份重要书库和笔记。首次使用双击「一键安装」；详情见[安装说明](docs/安装与卸载.md)。
 - **已经安装，想更新：** 下载新版 ZIP 并解压 → 退出 Kobo 上的 Reeden、连接 USB 并点“连接” → 双击 **一键更新-Windows.bat**。macOS 用 **一键更新-macOS.command**，Linux 用 `sh 一键更新-Linux.sh`。不需输入参数，自动保留书库、进度与旧版备份；完成后安全弹出。此入口安装当前 ZIP 中的版本，不会自动下载新版工具，详见 [更新说明](docs/安装与卸载.md#保留数据升级)。
-- **提交给原作者：** [上游 Pull Request #1](https://github.com/SSNQ/reeden-kobo/pull/1)。提交不等于已合并，以该页面状态为准。
-- **验证范围：** 本轮仅做 Windows 模拟 USB、命令行与安装/卸载回归测试，未进行 Kobo 实机测试。跨平台构建情况见 [Actions](https://github.com/Northfish0311/reeden-kobo/actions/workflows/ci.yml)。不承诺解决文字残影、续航或其他固件兼容问题。
+- **提交给原作者：** [安装器 PR #1](https://github.com/SSNQ/reeden-kobo/pull/1)；[阅读器恢复与锁屏 PR #2](https://github.com/SSNQ/reeden-kobo/pull/2)。是否合并由原作者决定。
+- **验证范围：** Windows 模拟 USB 升级、Linux 故障注入和 [ARMHF 构建](https://github.com/Northfish0311/reeden-kobo/actions/runs/41826078154)。本轮未用真实 Kobo 验证屏幕、睡眠或续航；各平台结果见 [Actions](https://github.com/Northfish0311/reeden-kobo/actions/workflows/ci.yml)。
 
-以下保留上游 0.7.5 的说明和历史记录。下文链接到 SSNQ 的发布附件是**上游版本，不包含本分支尚未合并的修改**；上游的实测记录不能当成本 Fork 已完成实测。
+以下保留上游 0.7.7 的说明和历史记录。下文 SSNQ 的发布附件是**原作者版本**；请使用本页顶部的社区版链接下载本次修复。
 
 ---
 

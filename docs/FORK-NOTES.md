@@ -4,10 +4,14 @@
 
 - 原项目：[SSNQ/reeden-kobo](https://github.com/SSNQ/reeden-kobo)，由 SSNQ 维护的 Reeden Kobo 社区兼容层。
 - 本 Fork：[Northfish0311/reeden-kobo](https://github.com/Northfish0311/reeden-kobo)，用于开发改进、补充测试，并向原作者提交贡献。
-- 本轮基于上游 v0.7.5 / `343b145549a9d7eb2ac99d533bde5c80638d2afb`。原项目的适配成果、历史测试、作者署名和 [MIT 许可证](../LICENSE) 均保留，不宣称由本 Fork 独立完成。
+- 当前社区版基于上游 v0.7.7 / `a6f2c9d5b8d3f3fa6782fd68658c3e0964228dc6`。原项目的适配成果、历史测试、作者署名和 [MIT 许可证](../LICENSE) 均保留，不宣称由本 Fork 独立完成。
 - 本 Fork 不是 Reeden 或 Kobo 官方产品，尚未合并的贡献不代表原作者已认可，也不代表任何官方合作或背书。
 
-## 本轮修改（2026-11-03）
+## 社区版 v0.7.7-community.1（2026-11-05）
+
+详见[更新内容与使用方法](releases/v0.7.7-community.1.md)。核心下载重试和缓存校验沿用上游 v0.7.7；社区版增加使用本地包的一键更新、菜单保护及[运行时修复 PR #2](https://github.com/SSNQ/reeden-kobo/pull/2)。
+
+## 早期分支修改（2026-11-03）
 
 1. USB 机型、NickelMenu、活动会话锁和升级前提检查提前到官方包下载与组包之前；实际写入前重复检查。
 2. 新增 `python install.py --check` 只读检查，可指定 `--kobo-mount`。不联网、不组包、不写入设备、不输出设备序列号。
@@ -18,7 +22,7 @@
 
 功能改进已提交至 [上游 PR #1](https://github.com/SSNQ/reeden-kobo/pull/1)，由原作者决定是否合并。本 Fork 专属的首页与本声明不包含在该功能 PR 内。
 
-## 测试边界
+## 早期测试记录（2026-11-03）
 
 本轮本地环境为 Windows / Python 3.12，使用临时模拟目录，不是真实 Kobo USB 盘：
 
