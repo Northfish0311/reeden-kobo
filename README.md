@@ -7,7 +7,7 @@
 - **下载：** 在[社区版下载页](https://github.com/Northfish0311/reeden-kobo/releases/tag/v0.7.7-community.1)选择文件名以 **OneClick.zip** 结尾的附件并完整解压；也可[下载本版本的代码包](https://github.com/Northfish0311/reeden-kobo/archive/refs/tags/v0.7.7-community.1.zip)。电脑需 Python 3.10+，Kobo 需已安装 NickelMenu。先备份重要书库和笔记。首次使用双击「一键安装」；详情见[安装说明](docs/安装与卸载.md)。
 - **已经安装，想更新：** 下载新版 ZIP 并解压 → 退出 Kobo 上的 Reeden、连接 USB 并点“连接” → 双击 **一键更新-Windows.bat**。macOS 用 **一键更新-macOS.command**，Linux 用 `sh 一键更新-Linux.sh`。不需输入参数，自动保留书库、进度与旧版备份；完成后安全弹出。此入口安装当前 ZIP 中的版本，不会自动下载新版工具，详见 [更新说明](docs/安装与卸载.md#保留数据升级)。
 - **提交给原作者：** [安装器 PR #1](https://github.com/SSNQ/reeden-kobo/pull/1)；[阅读器恢复与锁屏 PR #2](https://github.com/SSNQ/reeden-kobo/pull/2)。是否合并由原作者决定。
-- **验证范围：** Windows 模拟 USB 升级、Linux 故障注入和 [ARMHF 构建](https://github.com/Northfish0311/reeden-kobo/actions/runs/41826078154)。本轮未用真实 Kobo 验证屏幕、睡眠或续航；各平台结果见 [Actions](https://github.com/Northfish0311/reeden-kobo/actions/workflows/ci.yml)。
+- **验证范围：** [整合版自动化检查已通过](https://github.com/Northfish0311/reeden-kobo/actions/runs/42014699108)：Windows、macOS、Linux 模拟 USB 安装与升级，Linux 故障注入，ARMHF 重新构建及 QEMU 测试。本轮未用真实 Kobo 验证屏幕、睡眠或续航。
 
 以下保留上游 0.7.7 的说明和历史记录。下文 SSNQ 的发布附件是**原作者版本**；请使用本页顶部的社区版链接下载本次修复。
 
@@ -21,7 +21,7 @@
 
 > **非官方 / Experimental**：这是社区兼容层，不是 Reeden 或 Kobo 官方产品，不代表官方支持或背书。运行时拥有设备 root 权限并控制硬件；开始前请备份重要书籍和笔记，不能保证断电、损坏或所有配置都可恢复。
 >
-> **下载与电脑要求**：[最新 v0.7.7 一键安装/卸载包](https://github.com/SSNQ/reeden-kobo/releases/tag/v0.7.7)，需要 **Python 3.10+**。固定的 Bullseye 依赖免费 LTS 已结束，哈希校验不是持续安全更新；见 [依赖维护方案](docs/依赖安全维护.md)。
+> **原作者版本与电脑要求**：[原作者 v0.7.7 安装包](https://github.com/SSNQ/reeden-kobo/releases/tag/v0.7.7)，不含社区版修复；本次下载请用页首链接。需要 **Python 3.10+**。固定的 Bullseye 依赖免费 LTS 已结束，哈希校验不是持续安全更新；见 [依赖维护方案](docs/依赖安全维护.md)。
 
 ---
 
@@ -40,7 +40,7 @@ v0.7.5 已整合 Wi-Fi 桥接、夜间彩字分区刷新、翻页动画与文字
 - 程序及阅读数据安装在用户分区 `.adds/reeden-kobo`，菜单在 `.adds/nm/reeden-kobo`。不替换固件、系统库或开机启动项，不设置开机自启。运行时需要控制屏幕、触摸、电源和网络；恢复网络时可能回写 `/etc/resolv.conf`，恢复 DNS。
 - 开始前备份重要书籍和笔记。升级会保留旧安装和数据副本，需要足够剩余空间；不要在 Reeden 运行期间升级，也不要在写入时拔线。
 - 默认菜单不再提供开启 SSH 的入口，只保留 **Reeden SSH - Stop** 以便关闭旧版监听服务。可选诊断工具仅允许密钥认证，见 [SSH 说明](docs/SSH.md)。升级不自动终止现有 SSH 会话，旧服务需手动停止或重启设备。
-- [下载 v0.7.7 安装包](https://github.com/SSNQ/reeden-kobo/releases/tag/v0.7.7)。v0.7.3 及以前已被替代；不要混用旧标签自动生成的源码包和新版附件。
+- [下载社区修复版](https://github.com/Northfish0311/reeden-kobo/releases/tag/v0.7.7-community.1)。不要混用不同版本的源码和安装附件。
 
 ### 退出和故障恢复
 
