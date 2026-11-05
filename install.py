@@ -714,6 +714,23 @@ def check_update_target(mount: pathlib.Path, expected: tuple[pathlib.Path, str])
         raise RuntimeError('更新目标已变化或原安装不可用，已停止写入。请确认仍连接原来的 Kobo 后重新运行更新。')
 
 
+def menu_matches_previous(entry: pathlib.Path, previous_menu: pathlib.Path | None) -> bool | None:
+    """Whether the live NickelMenu entry is still the one this tool shipped.
+
+    True means it is safe to replace with the new default, False means the user
+    customised it, and None means the comparison itself failed. A menu that cannot be
+    read must not abort an otherwise verified install: the caller keeps it and lets the
+    user compare by hand.
+    """
+    if previous_menu is None or previous_menu.is_symlink() or not previous_menu.is_file():
+        return False
+    try:
+        return sha256_file(entry) == sha256_file(previous_menu)
+    except OSError as exc:
+        print(f'提示：无法读取现有菜单（{exc}），按自定义菜单保留，未覆盖。')
+        return None
+
+
 def install_to_usb_mount(pkg_dir: pathlib.Path, mount: pathlib.Path, allow_upgrade: bool) -> None:
     # Repeat preflight here: the device may have changed while preparing the package.
     check_usb_target(mount, allow_upgrade)
@@ -765,12 +782,14 @@ def install_to_usb_mount(pkg_dir: pathlib.Path, mount: pathlib.Path, allow_upgra
         previous_menu = backup / 'nickelmenu.conf' if backup is not None else None
         if entry.is_symlink() or (entry.exists() and not entry.is_file()):
             raise RuntimeError('菜单路径不是普通文件，未覆盖。')
-        if entry.exists() and (previous_menu is None or previous_menu.is_symlink() or
-                               not previous_menu.is_file() or sha256_file(entry) != sha256_file(previous_menu)):
-            print('已保留自定义菜单；新版默认菜单在 .adds/reeden-kobo/nickelmenu.conf，可自行对照。')
-        else:
+        replace_menu = not entry.exists()
+        if entry.exists():
+            replace_menu = menu_matches_previous(entry, previous_menu) is True
+        if replace_menu:
             os.replace(menu_stage, entry)
             menu_replaced = True
+        else:
+            print('已保留自定义菜单；新版默认菜单在 .adds/reeden-kobo/nickelmenu.conf，可自行对照。')
     except BaseException:
         try:
             if promoted:
@@ -1023,7 +1042,7 @@ def main() -> int:
             has_existing = (mount / '.adds' / 'reeden-kobo').exists()
             mode_label = '保留书库与进度升级' if has_existing else '全新安装'
             if sys.stdin.isatty():
-                ans = input(f'\n检测到已通过 USB 挂载的 Kobo ({mount})，按回车立即【{mode_label}】(输入 n 取消): ').strip().lower()
+                ans = input(f'\n检测到已通过 USB 挂载的 Kobo ({mount})，按回车立即【{mode_label}】（输入其他内容取消）: ').strip().lower()
                 if ans not in ('', 'y', 'yes', '是', '确认'):
                     print('已取消设备安装。')
                     return 0

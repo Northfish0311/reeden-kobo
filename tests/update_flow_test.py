@@ -97,6 +97,24 @@ class UpdateTests(unittest.TestCase):
         self.assertEqual(self.run_main(['--update']), 0)
         self.assertEqual(entry.read_bytes(), b'new-menu\n')
 
+    def test_unreadable_menu_is_kept_without_rolling_back_the_install(self):
+        entry = self.mount / '.adds/nm/reeden-kobo'
+        entry.write_bytes(b'my commands')
+        (self.installed / 'nickelmenu.conf').write_bytes(b'old stock menu')
+        real_sha256 = installer.sha256_file
+
+        def unreadable_menu(path, *args, **kwargs):
+            if Path(path) == entry:
+                raise PermissionError(13, 'permission denied')
+            return real_sha256(path, *args, **kwargs)
+
+        with mock.patch.object(installer, 'sha256_file', side_effect=unreadable_menu):
+            self.assertEqual(self.run_main(['--update']), 0)
+        # A menu that cannot be read is kept, and the verified install still lands.
+        self.assertEqual(entry.read_bytes(), b'my commands')
+        self.assertEqual((self.installed / 'payload').read_bytes(), b'new-version')
+        self.assertIn('无法读取现有菜单', self.output.getvalue())
+
     def test_update_timeout_and_instant_check(self):
         for args, waits in [(['--update'], 30), (['--check'], 0)]:
             with mock.patch.object(installer.sys.stdin, 'isatty', return_value=True), mock.patch.object(installer.time, 'sleep') as sleep:
