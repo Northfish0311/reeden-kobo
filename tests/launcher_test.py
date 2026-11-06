@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Exercise recovery with synthetic child processes, never hardware or Reeden."""
 from pathlib import Path
-import os, shutil, subprocess, tempfile
+import hashlib, os, shutil, subprocess, tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
 with tempfile.TemporaryDirectory(prefix="reeden-launcher-") as temp:
@@ -54,6 +54,10 @@ exec /bin/sleep 5
     wrong = subprocess.run(["sh", str(app / "run.sh")], capture_output=True, timeout=10)
     assert wrong.returncode == 12 and not (app / "framebuffer-calls").exists()
     (app / "version").write_text("SN,4.9.77,4.46.23836,000-393\n")
+    files = sorted(path for path in app.rglob('*') if path.is_file())
+    (app / "SHA256SUMS").write_text(''.join(
+        f'{hashlib.sha256(path.read_bytes()).hexdigest()}  {path.relative_to(app).as_posix()}\n'
+        for path in files))
     p = subprocess.run(["sh", str(app / "run.sh")], timeout=10)
     log = (app / "logs/launcher.log").read_text()
     assert p.returncode == 20, (p.returncode, log)

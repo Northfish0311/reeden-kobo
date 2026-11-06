@@ -428,6 +428,31 @@ rmdir "$APP/state/active" || exit 1
         self.assertFalse((self.app / "state/active").exists())
         self.assert_restored()
 
+    def test_launch_rejects_missing_empty_or_redirected_manifest(self):
+        self.prepare_launcher()
+        manifest = self.app / "SHA256SUMS"
+        saved = self.write("saved-manifest", manifest.read_bytes())
+        for kind in ("missing", "empty", "symlink", "directory"):
+            with self.subTest(manifest=kind):
+                if manifest.is_dir() and not manifest.is_symlink():
+                    manifest.rmdir()
+                else:
+                    manifest.unlink(missing_ok=True)
+                if kind == "empty":
+                    manifest.touch()
+                elif kind == "symlink":
+                    manifest.symlink_to(saved)
+                elif kind == "directory":
+                    manifest.mkdir()
+                code, output = self.run_shell("run.sh")
+                log = (self.app / "logs/launcher.log").read_text()
+                self.assertEqual(code, 12, output + log)
+                self.assertIn("checksum manifest", log)
+                self.assertFalse((self.app / "state/active").exists())
+                self.assertFalse((self.app / "install-verification.log").exists())
+                for rel in ("userdata/notes.json", "storage/books/book.epub"):
+                    self.assertEqual((self.app / rel).read_bytes(), self.protected[rel])
+
     def test_failed_or_busy_session_blocks_resource_repair(self):
         self.prepare_launcher('''
 APP=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
