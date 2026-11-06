@@ -8,7 +8,7 @@ build_font_fallback.py outputs under build/ and deps/ next to the repository.
 import hashlib,json,os,pathlib,shutil,sys
 ROOT=pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT))
-from install import validate_official_core
+from install import PORT_VERSION, validate_official_core, create_resource_recovery
 CORE=pathlib.Path(os.environ['REEDEN_OFFICIAL_CORE'])
 matched_version=validate_official_core(CORE)
 P=ROOT/'package'
@@ -41,7 +41,7 @@ for src in (base/'usr/share/doc').glob('*/copyright'):copy(src,P/'licenses/debia
 certificates=sorted((base/'usr/share/ca-certificates/mozilla').glob('*.crt'))
 assert len(certificates)>100,'CA package missing'
 (P/'certs/ca-certificates.crt').write_bytes(b'\n'.join(x.read_bytes() for x in certificates))
-for name in ['run.sh','session.sh','recover.sh','guardian.sh','native-session.sh','power.sh','wifi.sh','precheck.sh','reeden-ssh.sh','uninstall.sh','install.sh','verify.sh']:
+for name in ['run.sh','session.sh','recover.sh','guardian.sh','native-session.sh','power.sh','wifi.sh','precheck.sh','reeden-ssh.sh','uninstall.sh','install.sh','verify.sh','integrity.sh']:
     copy(ROOT/'scripts'/name,P/name);(P/name).chmod(0o755)
 for name in ['lipc-get-prop','lipc-set-prop']:
     copy(ROOT/'scripts'/name,P/'bin'/name);(P/'bin'/name).chmod(0o755)
@@ -56,8 +56,10 @@ for src in (ROOT/'docs').rglob('*'):
 for src in (P/'runtime').iterdir():src.chmod(0o755)
 for src in (P/'bin').iterdir():src.chmod(0o755)
 copy(ROOT/'scripts/nickelmenu.conf',P/'nickelmenu.conf')
-info={'port_version':'0.7.7-experimental','official_version':matched_version,'model':'Kobo Clara Colour (393)','firmware':'4.46.23836','first_launch':'NOT_PERFORMED','official_core_unmodified':True,'ui_assets_overlay':True,'font_sha256':hashlib.sha256((P/'fonts/NotoSansCJKsc-Regular.otf').read_bytes()).hexdigest()}
+info={'port_version':PORT_VERSION,'official_version':matched_version,'model':'Kobo Clara Colour (393)','firmware':'4.46.23836','first_launch':'NOT_PERFORMED','official_core_unmodified':True,'ui_assets_overlay':True,'font_sha256':hashlib.sha256((P/'fonts/NotoSansCJKsc-Regular.otf').read_bytes()).hexdigest()}
 (P/'build-info.json').write_text(json.dumps(info,indent=2)+'\n')
+# Only resource bytes from this completed assembly enter the recovery archive.
+create_resource_recovery(P)
 # Empty mutable directories are excluded; checksums cover every shipped file.
 files=sorted(x for x in P.rglob('*') if x.is_file() and x.name!='SHA256SUMS')
 (P/'SHA256SUMS').write_text(''.join(hashlib.sha256(x.read_bytes()).hexdigest()+'  '+str(x.relative_to(P))+'\n' for x in files))

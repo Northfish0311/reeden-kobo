@@ -17,8 +17,21 @@ for pid in $(pidof luajit 2>/dev/null); do
 done
 NICKEL=$(pidof nickel 2>/dev/null) || { echo "Nickel is not running; refusing to take ownership"; exit 11; }
 chmod 755 "$APP"/*.sh "$APP"/bin/* "$APP"/runtime/* "$APP"/checks/* 2>/dev/null || true
-if [ -f "$APP/SHA256SUMS" ] && [ ! -f "$STATE/install-verified" ]; then
-    (cd "$APP" && sha256sum -c SHA256SUMS > "$APP/install-verification.log" 2>&1) || { echo "Package checksum verification failed; see install-verification.log"; exit 12; }
+if [ -f "$APP/SHA256SUMS" ]; then
+    # Recheck on every launch: resources can disappear after first installation.
+    if [ -f "$APP/integrity.sh" ]; then
+        expected=$(awk '$2 == "integrity.sh" {print $1; n++} END {if (n != 1) exit 1}' "$APP/SHA256SUMS") || exit 12
+        actual=$(sha256sum "$APP/integrity.sh") || exit 12
+        actual=${actual%% *}
+        [ "$actual" = "$expected" ] || { echo 'Integrity helper checksum failed; reinstall the package'; exit 12; }
+        sh "$APP/integrity.sh" repair > "$APP/install-verification.log" 2>&1 || {
+            echo 'Package checksum verification failed; see install-verification.log'
+            grep -E 'FAILED|INTEGRITY|No such file|WARNING' "$APP/install-verification.log" | head -n 12
+            exit 12
+        }
+    else
+        (cd "$APP" && sha256sum -c SHA256SUMS > "$APP/install-verification.log" 2>&1) || { echo "Package checksum verification failed; see install-verification.log"; exit 12; }
+    fi
     : > "$STATE/install-verified"
 fi
 "$APP/bin/fb-guard" --inspect || { echo "Unsupported framebuffer configuration"; exit 12; }

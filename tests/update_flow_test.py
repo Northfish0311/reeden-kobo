@@ -5,6 +5,7 @@ import hashlib
 import importlib.util
 import io
 from pathlib import Path
+import tarfile
 import tempfile
 import unittest
 from unittest import mock
@@ -114,6 +115,62 @@ class UpdateTests(unittest.TestCase):
         self.assertEqual(entry.read_bytes(), b'my commands')
         self.assertEqual((self.installed / 'payload').read_bytes(), b'new-version')
         self.assertIn('无法读取现有菜单', self.output.getvalue())
+
+    def test_update_installs_recovery_archive_without_user_data_or_menu_loss(self):
+        resources = {
+            'core/data/flutter_assets/shader.frag': b'core resource',
+            'ui-assets/shader.frag': b'overlay resource',
+        }
+        entry = self.mount / '.adds/nm/reeden-kobo'
+        entry.write_bytes(b'custom commands')
+        (self.installed / 'nickelmenu.conf').write_bytes(b'previous stock menu')
+        (self.installed / 'userdata/notes.json').write_bytes(b'private notes')
+        private = {name: (self.installed / name).read_bytes() for name in
+                   ('userdata/notes.json', 'userdata/progress', 'storage/book.epub')}
+        original_assemble = self.assemble
+
+        def assemble_with_recovery(core, version, prebuilt, dest, temp):
+            original_assemble(core, version, prebuilt, dest, temp)
+            for rel, data in resources.items():
+                path = dest / rel
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(data)
+            installer.create_resource_recovery(dest)
+            files = sorted(p for p in dest.rglob('*') if p.is_file() and p.name != 'SHA256SUMS')
+            (dest / 'SHA256SUMS').write_text(''.join(
+                f'{installer.sha256_file(p)}  {p.relative_to(dest).as_posix()}\n'
+                for p in files), encoding='utf-8')
+            return len(files)
+
+        with mock.patch.object(self, 'assemble', side_effect=assemble_with_recovery):
+            self.assertEqual(self.run_main(['--update']), 0)
+        archive = self.installed / 'integrity/resources.tar.gz'
+        with tarfile.open(archive) as package:
+            members = {member.name: package.extractfile(member).read()
+                       for member in package.getmembers() if member.isfile()}
+        self.assertEqual(members, resources)
+        self.assertIn(f'{installer.sha256_file(archive)}  integrity/resources.tar.gz\n',
+                      (self.installed / 'SHA256SUMS').read_text(encoding='utf-8'))
+        self.assertEqual(entry.read_bytes(), b'custom commands')
+        backup, = (self.mount / '.adds').glob('reeden-kobo-backup-*')
+        for rel, data in private.items():
+            self.assertEqual((self.installed / rel).read_bytes(), data)
+            self.assertEqual((backup / rel).read_bytes(), data)
+
+    def test_supported_sync_runs_after_either_menu_decision(self):
+        entry = self.mount / '.adds/nm/reeden-kobo'
+        for custom in (False, True):
+            with self.subTest(custom=custom):
+                (self.installed / 'nickelmenu.conf').write_bytes(b'old stock menu')
+                entry.write_bytes(b'custom commands' if custom else b'old stock menu')
+
+                def after_promotion():
+                    self.assertEqual((self.installed / 'payload').read_bytes(), b'new-version')
+                    self.assertEqual(entry.read_bytes(), b'custom commands' if custom else b'new-menu\n')
+
+                with mock.patch.object(installer.os, 'sync', create=True, side_effect=after_promotion) as sync:
+                    self.assertEqual(self.run_main(['--update']), 0)
+                    sync.assert_called_once_with()
 
     def test_update_timeout_and_instant_check(self):
         for args, waits in [(['--update'], 30), (['--check'], 0)]:

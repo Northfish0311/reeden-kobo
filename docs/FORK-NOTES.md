@@ -4,10 +4,16 @@
 
 - 原项目：[SSNQ/reeden-kobo](https://github.com/SSNQ/reeden-kobo)，由 SSNQ 维护的 Reeden Kobo 社区兼容层。
 - 本 Fork：[Northfish0311/reeden-kobo](https://github.com/Northfish0311/reeden-kobo)，用于开发改进、补充测试，并向原作者提交贡献。
-- 当前社区版基于上游 v0.7.7 / `a6f2c9d5b8d3f3fa6782fd68658c3e0964228dc6`。原项目的适配成果、历史测试、作者署名和 [MIT 许可证](../LICENSE) 均保留，不宣称由本 Fork 独立完成。
+- 当前社区版基于上游 v0.7.8 / `677cc9f1b1e92df7a50f42e1d5ea951dd66b5946`。原项目的适配成果、历史测试、作者署名和 [MIT 许可证](../LICENSE) 均保留，不宣称由本 Fork 独立完成。
 - 本 Fork 不是 Reeden 或 Kobo 官方产品，尚未合并的贡献不代表原作者已认可，也不代表任何官方合作或背书。
 
-## 社区版 v0.7.7-community.1（2026-11-05）
+## 社区版 v0.7.8-community.1（2026-11-06）
+
+合入 SSNQ v0.7.8 的本地资源恢复归档、每次启动完整校验、诊断输出和写入同步，保留下面的社区更新与恢复功能。新增模拟用例检查升级后的恢复归档、原菜单与用户数据，以及旧会话恢复和资源修复的先后顺序。详情见[本次发布说明](releases/v0.7.8-community.1.md)。
+
+上游的实机六资源恢复记录属于 SSNQ 的版本；本社区整合版仍需在真实 Kobo 上验证，未扩大固件或机型支持范围。
+
+## 社区版 v0.7.7-community.1（2026-11-05，历史版本）
 
 详见[更新内容与使用方法](releases/v0.7.7-community.1.md)。核心下载重试和缓存校验沿用上游 v0.7.7；社区版增加使用本地包的一键更新、菜单保护及[运行时修复 PR #2](https://github.com/SSNQ/reeden-kobo/pull/2)。
 
