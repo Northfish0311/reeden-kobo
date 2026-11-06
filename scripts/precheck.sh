@@ -4,7 +4,8 @@
 set -u
 APP=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 
-echo "=== Reeden Kobo 0.7.2 Self-Check ==="
+port_ver=$(sed -n 's/.*"port_version":[[:space:]]*"\([^"]*\)".*/\1/p' "$APP/build-info.json" 2>/dev/null | head -n 1)
+echo "=== Reeden Kobo ${port_ver:-unknown} Self-Check ==="
 
 # 1. Model & Firmware
 if [ -f /mnt/onboard/.kobo/version ]; then
@@ -57,7 +58,8 @@ if [ -f "$APP/SHA256SUMS" ]; then
         echo '[OK] Package SHA-256: current files verified'
     else
         echo '[FAIL] Package SHA-256: current file checksum failed'
-        tail -n 3 "$check_log"
+        grep -E 'FAILED|No such file|WARNING|INTEGRITY' "$check_log" | head -n 12
+        echo '[INFO] Full details: .adds/reeden-kobo/install-verification.log after a failed launch'
     fi
 else
     echo '[FAIL] Package SHA-256: manifest missing'

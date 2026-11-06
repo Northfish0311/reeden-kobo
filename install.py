@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Reeden Kobo (0.7.7) One-Click Builder & Installer.
+"""Reeden Kobo (0.7.8) One-Click Builder & Installer.
 
 Combines the verified MIT Kobo compatibility layer with the user's unmodified
 official Reeden Kindle 1.43.1+780 or 1.43.2+791 core and pinned Debian Bullseye ARMHF runtime
@@ -46,7 +46,7 @@ SUPPORTED_CORES = {
     },
 }
 OFFICIAL_LATEST_URL = 'https://download.reeden.app/Reeden/latest/Reeden-kindle.zip'
-PORT_VERSION = '0.7.7-experimental'
+PORT_VERSION = '0.7.8-experimental'
 SUPPORTED_PRODUCT = '393'
 
 
@@ -350,7 +350,7 @@ def download_official_core(temp_root: pathlib.Path) -> tuple[pathlib.Path, str]:
         result = None
         try:
             print(f'[1/4] 正在从 Reeden 官网下载并校验 ({OFFICIAL_LATEST_URL}, {attempt + 1}/3) ...')
-            req = urllib.request.Request(OFFICIAL_LATEST_URL, headers={'User-Agent': 'reeden-kobo-installer/0.7.7'})
+            req = urllib.request.Request(OFFICIAL_LATEST_URL, headers={'User-Agent': 'reeden-kobo-installer/0.7.8'})
             with open_url_with_cert_fallback(req, timeout=180) as resp, partial.open('wb') as out:
                 shutil.copyfileobj(resp, out)
                 expected_size = resp.headers.get('Content-Length')
@@ -422,7 +422,7 @@ def download_verified(url: str, sha256: str, cache_dir: pathlib.Path, alt_dirs: 
     cache_dir.mkdir(parents=True, exist_ok=True)
     dest = cache_dir / filename
     print(f'      下载依赖: {filename} ...')
-    req = urllib.request.Request(url, headers={'User-Agent': 'reeden-kobo-installer/0.7.7'})
+    req = urllib.request.Request(url, headers={'User-Agent': 'reeden-kobo-installer/0.7.8'})
     with open_url_with_cert_fallback(req, timeout=60) as resp, dest.open('wb') as out:
         shutil.copyfileobj(resp, out)
     if sha256_file(dest) != sha256:
@@ -507,6 +507,26 @@ def extract_deb_pure(deb_path: pathlib.Path, dest_dir: pathlib.Path) -> None:
         symlinks = remaining
 
 
+def create_resource_recovery(dest: pathlib.Path) -> pathlib.Path:
+    """Keep verified installed resources recoverable without bundling a core in Git.
+
+    The archive is built locally from the already validated official core and the
+    completed UI overlay. It is itself included in the final package SHA list.
+    Runtime recovery extracts individual missing files and verifies their digest;
+    it never unpacks the archive over an existing installation wholesale.
+    """
+    archive = dest / 'integrity/resources.tar.gz'
+    archive.parent.mkdir(parents=True, exist_ok=True)
+    resources = sorted(path for base in ('core/data', 'ui-assets')
+                       for path in (dest / base).rglob('*') if path.is_file())
+    with tarfile.open(archive, 'w:gz', compresslevel=6) as tf:
+        for path in resources:
+            if path.is_symlink():
+                raise ValueError('Resource recovery does not accept symlinks')
+            tf.add(path, arcname=path.relative_to(dest).as_posix(), recursive=False)
+    return archive
+
+
 def assemble_package(
     core_dir: pathlib.Path,
     official_version: str,
@@ -581,7 +601,7 @@ def assemble_package(
     for name in [
         'run.sh', 'session.sh', 'recover.sh', 'guardian.sh',
         'native-session.sh', 'power.sh', 'wifi.sh', 'precheck.sh', 'reeden-ssh.sh',
-        'uninstall.sh', 'install.sh', 'verify.sh',
+        'uninstall.sh', 'install.sh', 'verify.sh', 'integrity.sh',
     ]:
         copy_lf_script(ROOT / 'scripts' / name, dest / name, 0o755)
     for name in ['lipc-get-prop', 'lipc-set-prop']:
@@ -615,6 +635,7 @@ def assemble_package(
     (dest / 'build-info.json').write_text(json.dumps(info, indent=2) + '\n', encoding='utf-8', newline='\n')
 
     cleanup_appledouble(dest)
+    create_resource_recovery(dest)
     files = sorted(x for x in dest.rglob('*') if x.is_file() and x.name != 'SHA256SUMS')
     sums_text = ''.join(f'{sha256_file(x)}  {x.relative_to(dest).as_posix()}\n' for x in files)
     (dest / 'SHA256SUMS').write_text(sums_text, encoding='utf-8', newline='\n')
@@ -790,6 +811,10 @@ def install_to_usb_mount(pkg_dir: pathlib.Path, mount: pathlib.Path, allow_upgra
             menu_replaced = True
         else:
             print('已保留自定义菜单；新版默认菜单在 .adds/reeden-kobo/nickelmenu.conf，可自行对照。')
+        # Complete pending removable-filesystem writes before reporting success.
+        # Windows does not expose os.sync; safe eject remains required there.
+        if hasattr(os, 'sync'):
+            os.sync()
     except BaseException:
         try:
             if promoted:

@@ -84,6 +84,7 @@ else
     mv -f "$MENU_STAGE" "$ENTRY"
 fi
 COMMITTED=1
+sync
 if [ -n "$BACKUP" ]; then
     echo "Upgraded $DEST (previous build backed up to $BACKUP, userdata and storage preserved); FIRST LAUNCH WAS NOT PERFORMED."
 else
