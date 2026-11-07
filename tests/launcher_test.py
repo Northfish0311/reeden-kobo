@@ -48,6 +48,7 @@ echo "$*" >> "$(dirname "$0")/../framebuffer-calls"
 ''')
     script(app / "runtime/reeden-kindle", '''
 [ "$1" = --verify ] && exit 0
+printf '%s\\n' "${REEDEN_TURN_PROFILE-unset}" "${REEDEN_TEXT_BAND_PATH-unset}" "${REEDEN_TEXT_QUALITY_AFTER_TURN-unset}" > "$REEDEN_KOBO_DIR/host-env"
 exec /bin/sleep 5
 ''')
     (app / "version").write_text("SN,4.9.77,4.46.23836,000-391\n")
@@ -58,7 +59,9 @@ exec /bin/sleep 5
     (app / "SHA256SUMS").write_text(''.join(
         f'{hashlib.sha256(path.read_bytes()).hexdigest()}  {path.relative_to(app).as_posix()}\n'
         for path in files))
-    p = subprocess.run(["sh", str(app / "run.sh")], timeout=10)
+    keys = ("REEDEN_TURN_PROFILE", "REEDEN_TEXT_BAND_PATH", "REEDEN_TEXT_QUALITY_AFTER_TURN")
+    env = {k: v for k, v in os.environ.items() if k not in keys}
+    p = subprocess.run(["sh", str(app / "run.sh")], timeout=10, env=env)
     log = (app / "logs/launcher.log").read_text()
     assert p.returncode == 20, (p.returncode, log)
     assert "Nickel was never paused" in log, log
@@ -67,4 +70,22 @@ exec /bin/sleep 5
     assert (app / "framebuffer-calls").read_text().strip() == "--inspect"
     assert not (app / "state/active").exists(), "Session lock leaked"
     assert not (app / "state/handoff").exists(), "Hardware handoff leaked"
+
+    host_env = app / "host-env"
+    assert host_env.read_text().splitlines() == ["unset"] * 3
+    inherited = dict(zip(keys, ("timed", "reagl", "1")))
+    for profile, expected in {
+        "stable": ["stable", "unset", "unset"],
+        "off": ["off", "unset", "unset"],
+        "timed": ["timed", "unset", "unset"],
+        "reagl": ["stable", "reagl", "unset"],
+        "clean": ["stable", "unset", "1"],
+        "invalid": list(inherited.values()),
+    }.items():
+        host_env.unlink()
+        (app / "userdata/turn-profile").write_bytes((profile + "\r\n").encode())
+        p = subprocess.run(["sh", str(app / "run.sh")], timeout=10, env={**env, **inherited})
+        assert p.returncode == 20, (profile, p.returncode, (app / "logs/launcher.log").read_text())
+        assert host_env.read_text().splitlines() == expected, profile
+    print("PASS: device profiles survive launch verification and select independent refresh modes")
     print("PASS: missing first frame exits 20; no Nickel signals, framebuffer writes or input grabs; owned child recovered")

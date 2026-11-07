@@ -9,6 +9,8 @@
 - **提交给原作者：** [安装器 PR #1](https://github.com/SSNQ/reeden-kobo/pull/1)；[阅读器恢复与锁屏 PR #2](https://github.com/SSNQ/reeden-kobo/pull/2)。是否合并由原作者决定。
 - **验证范围：** 发布流程运行 Windows、macOS、Linux 模拟 USB 安装与升级、Linux 故障注入、ARMHF 重新构建及 QEMU 测试；以[对应提交的 Actions](https://github.com/Northfish0311/reeden-kobo/actions/workflows/ci.yml)为准。**本社区整合版仍待实机验收**，原作者的 v0.7.8 真机记录不能替代本分支的设备测试。
 
+**当前已知限制：** 社区版没有改写 Reeden 的规则引擎，也没有解决水波纹翻页残影。它保留了[通过 USB 选择翻页模式](docs/翻页动画AB测试流程.md#在设备上切换不需要-ssh)的入口，不默认追加整页刷新。用户报告耗电偏高；本版没有续航改善的实测数据。Wi-Fi 在退出时交还原生系统，亮度和色温尝试恢复启动前的值，不是两边实时同步。详见[实机核对方法](docs/测试说明.md#耗电与原生设置)。
+
 以下保留上游 0.7.8 的说明和历史记录。下文 SSNQ 的发布附件是**原作者版本**；请使用本页顶部的社区版链接下载本次修复。
 
 ---
