@@ -63,4 +63,18 @@ exec /bin/sleep 5
     assert (app / "framebuffer-calls").read_text().strip() == "--inspect"
     assert not (app / "state/active").exists(), "Session lock leaked"
     assert not (app / "state/handoff").exists(), "Hardware handoff leaked"
+
+    # The per-device animation profile is read from userdata, so an upgrade keeps it.
+    (app / "userdata").mkdir()
+    (app / "userdata/turn-profile").write_text("reagl\n")
+    script(app / "runtime/reeden-kindle", '''
+[ "$1" = --verify ] && exit 0
+env | grep -E '^REEDEN_TURN_PROFILE=|^REEDEN_TEXT_BAND_PATH=' > "$(dirname "$0")/../host-env"
+exec /bin/sleep 5
+''')
+    subprocess.run(["sh", str(app / "run.sh")], timeout=10, capture_output=True)
+    dumped = (app / "host-env").read_text()
+    assert "REEDEN_TURN_PROFILE=stable" in dumped, dumped
+    assert "REEDEN_TEXT_BAND_PATH=reagl" in dumped, dumped
+    print("PASS: turn-profile file selects the compensated band path")
     print("PASS: missing first frame exits 20; no Nickel signals, framebuffer writes or input grabs; owned child recovered")

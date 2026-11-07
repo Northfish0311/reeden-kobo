@@ -48,6 +48,17 @@ export REEDEN_UPDATE_FEED=http://127.0.0.1:9/kobo-updates-disabled.json
 export GIO_USE_VFS=local GSETTINGS_BACKEND=memory
 export SSL_CERT_FILE="$APP/certs/ca-certificates.crt" SSL_CERT_DIR="$APP/certs"
 unset LD_LIBRARY_PATH LD_PRELOAD LD_AUDIT
+# Optional per-device animation profile. It lives in userdata so reinstalling or
+# upgrading keeps the choice, and stays empty on a stock install.
+#   stable (default) | off | timed | reagl | clean
+if [ -f "$APP/userdata/turn-profile" ]; then
+    profile=$(head -c 32 "$APP/userdata/turn-profile" | tr -d ' \t\r\n')
+    case "$profile" in
+        stable|off|timed) export REEDEN_TURN_PROFILE="$profile" ;;
+        reagl) export REEDEN_TURN_PROFILE=stable REEDEN_TEXT_BAND_PATH=reagl ;;
+        clean) export REEDEN_TURN_PROFILE=stable REEDEN_TEXT_QUALITY_AFTER_TURN=1 ;;
+    esac
+fi
 cd "$APP/core" || exit 18
 "$APP/runtime/reeden-kindle" --library-path "$APP/runtime:$APP/lib:$APP/core/lib" --preload "$APP/lib/libreeden_kobo_compat.so" "$APP/bin/reeden-kindle" >> "$APP/logs/current.log" 2>&1 &
 HOST=$!
