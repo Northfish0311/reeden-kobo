@@ -4,6 +4,7 @@
 export PATH=/usr/local/Kobo:/usr/sbin:/usr/bin:/sbin:/bin
 unset LD_LIBRARY_PATH LD_PRELOAD LD_AUDIT
 exec >> "$APP/logs/power.log" 2>&1
+echo "[power] invoked arg=${1:-} $(date)"
 power_phase() {
     read -r power_uptime power_rest < /proc/uptime
     power_uptime=${power_uptime%%.*}

@@ -336,6 +336,7 @@ static int flush(Display *d,const uint8_t *cover){
          * never acquire an extra update. quality_status: 0=off/skipped,
          * 1=completed, 2=send rejected, 3=completion failed. */
         if(bands==1&&animate&&d->evidence_options.quality_after_turn&&
+           (d->evidence_options.quality_every<2||d->refreshes%d->evidence_options.quality_every==0)&&
            d->v.xres==1072&&d->v.yres==1448&&d->v.rotate==3){
             struct update q={.region={0,0,d->v.xres,d->v.yres},
                 .waveform=plan.night?REFRESH_GLKW16:REFRESH_GLR16,.mode=1,.marker=next_marker(d)};

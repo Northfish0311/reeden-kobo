@@ -18,7 +18,20 @@ echo "[launcher] $(date)"
 if [ -d "$STATE/active" ]; then
     if [ -f "$STATE/owner" ]; then read -r pid start < "$STATE/owner"; if same_process "$pid" "$start"; then echo "Already running"; exit 0; fi; fi
     "$APP/recover.sh"
-    [ ! -d "$STATE/active" ] || { echo "Previous session recovery is busy or failed; see launcher.log"; exit 14; }
+    if [ -d "$STATE/active" ]; then
+        # A crashed session can leave the lock behind after recovery refuses it, and
+        # every later launch then looks like "nothing happened". Only a live owner may
+        # block a launch, so clear the leftovers when no process is holding them.
+        stale=false
+        if [ -f "$STATE/owner" ]; then read -r pid start < "$STATE/owner"; same_process "$pid" "$start" && stale=true; fi
+        if [ "$stale" = false ]; then
+            echo '[launcher] clearing stale session state after a failed recovery'
+            rm -rf "$STATE/active" "$STATE/recovering" "$STATE/owner" "$STATE/host" "$STATE/ready" "$STATE/handoff"
+        else
+            echo "Previous session recovery is busy or failed; see launcher.log"
+            exit 14
+        fi
+    fi
 fi
 # Never take display ownership from KOReader. Return to Nickel first.
 for pid in $(pidof luajit 2>/dev/null); do
@@ -101,9 +114,10 @@ unset LD_LIBRARY_PATH LD_PRELOAD LD_AUDIT
 if [ -f "$APP/userdata/turn-profile" ]; then
     profile=$(head -c 32 "$APP/userdata/turn-profile" | tr -d ' \t\r\n')
     case "$profile" in
-        stable|off|timed) export REEDEN_TURN_PROFILE="$profile"; unset REEDEN_TEXT_BAND_PATH REEDEN_TEXT_QUALITY_AFTER_TURN ;;
-        reagl) export REEDEN_TURN_PROFILE=stable REEDEN_TEXT_BAND_PATH=reagl; unset REEDEN_TEXT_QUALITY_AFTER_TURN ;;
-        clean) export REEDEN_TURN_PROFILE=stable REEDEN_TEXT_QUALITY_AFTER_TURN=1; unset REEDEN_TEXT_BAND_PATH ;;
+        stable|off|timed) export REEDEN_TURN_PROFILE="$profile"; unset REEDEN_TEXT_BAND_PATH REEDEN_TEXT_QUALITY_AFTER_TURN REEDEN_TEXT_QUALITY_EVERY ;;
+        reagl) export REEDEN_TURN_PROFILE=stable REEDEN_TEXT_BAND_PATH=reagl; unset REEDEN_TEXT_QUALITY_AFTER_TURN REEDEN_TEXT_QUALITY_EVERY ;;
+        clean) export REEDEN_TURN_PROFILE=stable REEDEN_TEXT_QUALITY_AFTER_TURN=1; unset REEDEN_TEXT_BAND_PATH REEDEN_TEXT_QUALITY_EVERY ;;
+        sweep) export REEDEN_TURN_PROFILE=stable REEDEN_TEXT_QUALITY_AFTER_TURN=1 REEDEN_TEXT_QUALITY_EVERY=5; unset REEDEN_TEXT_BAND_PATH ;;
     esac
 fi
 cd "$APP/core" || exit 18

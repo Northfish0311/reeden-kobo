@@ -11,6 +11,7 @@ typedef struct {
     char directory[1024];
     unsigned limit,used;
     bool quality_after_turn,reagl_bands;
+    unsigned quality_every;
 } FrameEvidenceOptions;
 typedef struct {
     unsigned width,height,logical_stride,rotation;
