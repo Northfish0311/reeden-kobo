@@ -62,10 +62,26 @@ elif [ -s "$STATE/paused" ]; then
         [ "$phase" != nickel ] || sleep 1
     done
 fi
+restore_light() {
+    # $1 sysfs path, $2 value recorded at launch, $3 highest valid value.
+    path=$1 saved=$2 max=$3 current=""
+    [ -r "$path" ] || return 0
+    current=$(cat "$path" 2>/dev/null) || return 0
+    case "$saved" in ''|*[!0-9]*) return 0;; esac
+    case "$current" in ''|*[!0-9]*) return 0;; esac
+    [ "$saved" -le "$max" ] || return 0
+    # Only undo our own dimming. A brightness the user changed inside the reader is
+    # already on the hardware and must survive the return to Nickel.
+    if [ "$current" -eq 0 ]; then
+        echo "$saved" > "$path" && echo "[recovery] restored light $path=$saved after dimming" >> "$APP/logs/launcher.log"
+    else
+        echo "[recovery] kept reader light $path=$current" >> "$APP/logs/launcher.log"
+    fi
+}
 if [ -f "$STATE/light" ]; then
     read -r brightness warmth < "$STATE/light"
-    case "$brightness" in ''|*[!0-9]*) :;; *) [ "$brightness" -le 100 ] && echo "$brightness" > /sys/class/backlight/mxc_msp430.0/brightness;; esac
-    case "$warmth" in ''|*[!0-9]*) :;; *) [ "$warmth" -le 10 ] && echo "$warmth" > /sys/class/backlight/lm3630a_led/color;; esac
+    restore_light /sys/class/backlight/mxc_msp430.0/brightness "$brightness" 100
+    restore_light /sys/class/backlight/lm3630a_led/color "$warmth" 10
 fi
 rm -f "$STATE/host" "$STATE/owner" "$STATE/paused" "$STATE/light" "$STATE/framebuffer" "$STATE/heartbeat" "$STATE/ready" "$STATE/handoff" "$STATE/asleep" "$STATE/power-cancel" "$STATE/power-phase" "$STATE/power-phase.new" "$STATE/native-restart" "$STATE/native-env" "$STATE/native-pids"
 rmdir "$STATE/active" || { echo "[recovery] active state could not be cleared" >> "$APP/logs/launcher.log"; exit 1; }
