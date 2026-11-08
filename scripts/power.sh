@@ -71,17 +71,26 @@ sleep 2
 # shorten a panel-specific timing parameter.
 attempt=0
 idle=0
-while [ "$idle" -lt 2 ]; do
+if [ -r /sys/kernel/debug/wakeup_sources ]; then
+    while [ "$idle" -lt 2 ]; do
+        [ ! -f "$STATE/power-cancel" ] || exit 2
+        [ "$attempt" -lt 48 ] || { echo '[power] display did not become idle'; exit 4; }
+        if awk '$1 == "hwtcon_wakelock" || $1 == "cmdq_wakelock" { if ($6 != 0) busy=1 } END { exit busy }' /sys/kernel/debug/wakeup_sources && ! grep -q '_hrtint_xon_' /proc/timer_list; then
+            idle=$((idle+1))
+        else idle=0
+        fi
+        usleep 250000
+        attempt=$((attempt+1))
+    done
+    echo "[power] display idle after $attempt polls"
+else
+    # Without the debugfs view the panel cannot be proven idle. Refusing to sleep
+    # would keep the radio and CPU awake all night, which costs far more than one
+    # extra settle delay, so try suspend after a fixed wait instead.
+    echo '[power] wakeup_sources unreadable; fixed settle before suspend'
+    sleep 2
     [ ! -f "$STATE/power-cancel" ] || exit 2
-    [ "$attempt" -lt 48 ] || { echo '[power] display did not become idle'; exit 4; }
-    if awk '$1 == "hwtcon_wakelock" || $1 == "cmdq_wakelock" { if ($6 != 0) busy=1 } END { exit busy }' /sys/kernel/debug/wakeup_sources && ! grep -q '_hrtint_xon_' /proc/timer_list; then
-        idle=$((idle+1))
-    else idle=0
-    fi
-    usleep 250000
-    attempt=$((attempt+1))
-done
-echo "[power] display idle after $attempt polls"
+fi
 # During physical acceptance only, a previously unused RTC alarm provides a
 # bounded wakeup. Never overwrite an existing alarm.
 if [ -f "$STATE/power-test" ]; then
