@@ -17,15 +17,15 @@ exec >> "$APP/logs/launcher.log" 2>&1
 echo "[launcher] $(date)"
 if [ -d "$STATE/active" ]; then
     if [ -f "$STATE/owner" ]; then read -r pid start < "$STATE/owner"; if same_process "$pid" "$start"; then echo "Already running"; exit 0; fi; fi
-    "$APP/recover.sh"
+    "$APP/recover.sh"; recovery=$?
     if [ -d "$STATE/active" ]; then
-        # A crashed session can leave the lock behind after recovery refuses it, and
-        # every later launch then looks like "nothing happened". Only a live owner may
-        # block a launch, so clear the leftovers when no process is holding them.
-        stale=false
-        if [ -f "$STATE/owner" ]; then read -r pid start < "$STATE/owner"; same_process "$pid" "$start" && stale=true; fi
-        if [ "$stale" = false ]; then
-            echo '[launcher] clearing stale session state after a failed recovery'
+        # Recovery can decide there is nothing to do and leave the lock behind, which
+        # makes every later launch look like it did nothing. Only that case is cleared;
+        # a recovery that reported failure or busy keeps blocking the launch.
+        live=false
+        if [ -f "$STATE/owner" ]; then read -r pid start < "$STATE/owner"; same_process "$pid" "$start" && live=true; fi
+        if [ "$recovery" -eq 0 ] && [ "$live" = false ]; then
+            echo '[launcher] clearing stale session state left by an empty recovery'
             rm -rf "$STATE/active" "$STATE/recovering" "$STATE/owner" "$STATE/host" "$STATE/ready" "$STATE/handoff"
         else
             echo "Previous session recovery is busy or failed; see launcher.log"
