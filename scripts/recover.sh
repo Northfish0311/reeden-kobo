@@ -32,7 +32,7 @@ sync_nickel_light() {
     [ -r "$light_path" ] || return 0
     level=$(cat "$light_path" 2>/dev/null) || return 0
     case "$level" in ''|*[!0-9]*) return 0;; esac
-    [ "$level" -le 100 ] || return 0
+    [ "$level" -gt 0 ] && [ "$level" -le 100 ] || return 0
     if [ "$level" -gt 0 ]; then light_state=true; else light_state=false; fi
     current=$(awk '/^\[PowerOptions\]/{po=1;next} /^\[/{po=0} po&&/^FrontLightLevel[ \t]*=/{split($0,a,"=");gsub(/[ \t]/,"",a[2]);print a[2];exit}' "$cfg" 2>/dev/null)
     [ "$current" = "$level" ] && return 0
@@ -107,7 +107,7 @@ restore_light() {
     current=$(cat "$path" 2>/dev/null) || return 0
     case "$saved" in ''|*[!0-9]*) return 0;; esac
     case "$current" in ''|*[!0-9]*) return 0;; esac
-    [ "$saved" -le "$max" ] || return 0
+    [ "$saved" -gt 0 ] && [ "$saved" -le "$max" ] || return 0
     # Only undo our own dimming. A brightness the user changed inside the reader is
     # already on the hardware and must survive the return to Nickel.
     if [ "$current" -eq 0 ]; then

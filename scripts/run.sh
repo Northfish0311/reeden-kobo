@@ -55,11 +55,17 @@ verify_manifest() {
         actual=$(sha256sum "$APP/integrity.sh") || exit 12
         actual=${actual%% *}
         [ "$actual" = "$expected" ] || { echo 'Integrity helper checksum failed; reinstall the package'; exit 12; }
-        sh "$APP/integrity.sh" repair > "$APP/install-verification.log" 2>&1 || {
-            echo 'Package checksum verification failed; see install-verification.log'
-            grep -E 'FAILED|INTEGRITY|No such file|WARNING' "$APP/install-verification.log" | head -n 12
-            exit 12
-        }
+        if ! sh "$APP/integrity.sh" repair > "$APP/install-verification.log" 2>&1; then
+            # Repair can fail on an archive entry this package no longer ships. If every
+            # file on disk still matches, nothing needs restoring and the session can run.
+            if (cd "$APP" && sha256sum -c SHA256SUMS > "$APP/install-verification.log" 2>&1); then
+                echo '[verify] repair failed but every file on disk matches; continuing'
+            else
+                echo 'Package checksum verification failed; see install-verification.log'
+                grep -E 'FAILED|INTEGRITY|No such file|WARNING' "$APP/install-verification.log" | head -n 12
+                exit 12
+            fi
+        fi
     else
         (cd "$APP" && sha256sum -c SHA256SUMS > "$APP/install-verification.log" 2>&1) || { echo "Package checksum verification failed; see install-verification.log"; exit 12; }
     fi
