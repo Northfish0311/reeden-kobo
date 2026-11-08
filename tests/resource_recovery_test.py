@@ -470,7 +470,8 @@ exit 0
         self.assertFalse((self.app / "state/active").exists())
         self.assert_restored()
 
-    def test_failed_or_busy_session_blocks_resource_repair(self):        self.prepare_launcher('''
+    def test_failed_or_busy_session_blocks_resource_repair(self):
+        self.prepare_launcher('''
 APP=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 read -r status < "$APP/state/recovery-status" || exit 1
 exit "$status"
