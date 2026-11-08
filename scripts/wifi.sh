@@ -81,7 +81,7 @@ stop_supplicant() {
         fi
     done
 }
-wifi_off() {
+wifi_down_services() {
     saved=/tmp/reeden-kobo-wifi-resolv-$$
     [ ! -f /etc/resolv.conf ] || cp /etc/resolv.conf "$saved"
     timeout 4 dhcpcd -d -k wlan0 || :
@@ -91,8 +91,22 @@ wifi_off() {
     fi
     stop_supplicant || return 1
     if [ -r /sys/class/net/wlan0/flags ]; then ifconfig wlan0 down || return 1; fi
+}
+wifi_radio_off() {
     echo 0 > /dev/wmtWifi || return 1
     echo '[wifi] radio off'
+}
+wifi_off() {
+    wifi_down_services || return 1
+    wifi_radio_off
+}
+# Some firmware keeps the radio off until the user toggles Wi-Fi in Nickel. The
+# handoff mode is a per-device switch so both behaviours can be compared without a
+# rebuild: "keep" stops our services but leaves the radio powered.
+wifi_handoff_mode() {
+    [ -f "$APP/userdata/wifi-handoff" ] || { echo default; return; }
+    mode=$(tr -d ' \t\r\n' < "$APP/userdata/wifi-handoff" 2>/dev/null)
+    [ "$mode" = keep ] && echo keep || echo default
 }
 wifi_on() {
     # Two Kindle properties are set for one UI tap. Do not restart a healthy
@@ -129,6 +143,14 @@ wifi_on() {
 }
 case "$mode" in
 off) wifi_off && rm -f "$STATE/wifi-restore";;
-suspend|native) wifi_off;;
+suspend) wifi_off;;
+native)
+    if [ "$(wifi_handoff_mode)" = keep ]; then
+        if wifi_down_services; then
+            echo '[wifi] radio kept powered for native handoff'
+        fi
+    else
+        wifi_off
+    fi;;
 on|resume) wifi_on;;
 esac
