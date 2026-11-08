@@ -22,6 +22,44 @@ if [ -f "$STATE/night-invert" ]; then
     if printf 'night_mode 0' > /proc/hwtcon/cmd; then rm -f "$STATE/night-invert"; fi
 fi
 radio_failed=false
+# Nickel re-applies the brightness stored in its own configuration when it starts,
+# which is why a level chosen inside the reader was lost on exit. Write the hardware
+# level into [PowerOptions] first so both UIs agree.
+sync_nickel_light() {
+    cfg=${NICKEL_CONF:-/mnt/onboard/.kobo/Kobo/Kobo eReader.conf}
+    [ -f "$cfg" ] || return 0
+    light_path=${LIGHT_PATH:-/sys/class/backlight/mxc_msp430.0/brightness}
+    [ -r "$light_path" ] || return 0
+    level=$(cat "$light_path" 2>/dev/null) || return 0
+    case "$level" in ''|*[!0-9]*) return 0;; esac
+    [ "$level" -le 100 ] || return 0
+    if [ "$level" -gt 0 ]; then light_state=true; else light_state=false; fi
+    current=$(awk '/^\[PowerOptions\]/{po=1;next} /^\[/{po=0} po&&/^FrontLightLevel[ \t]*=/{split($0,a,"=");gsub(/[ \t]/,"",a[2]);print a[2];exit}' "$cfg" 2>/dev/null)
+    [ "$current" = "$level" ] && return 0
+    tmp="$cfg.reeden-new"
+    awk -v level="$level" -v state="$light_state" '
+        { lines[NR]=$0 }
+        END {
+            for (i=1;i<=NR;i++) {
+                line=lines[i]
+                if (line ~ /^\[PowerOptions\][ \t]*$/) {
+                    print line; print "FrontLightLevel=" level; print "FrontLightState=" state
+                    inpo=1; continue
+                }
+                if (line ~ /^\[/) { inpo=0 }
+                if (inpo && line ~ /^FrontLight(Level|State)[ \t]*=/) { continue }
+                print line
+            }
+        }' "$cfg" > "$tmp" || { rm -f "$tmp"; return 1; }
+    if [ -s "$tmp" ] && mv -f "$tmp" "$cfg"; then
+        echo "[recovery] Nickel brightness updated to $level" >> "$APP/logs/launcher.log"
+    else
+        rm -f "$tmp"
+        echo "[recovery] Nickel brightness update failed; hardware value kept" >> "$APP/logs/launcher.log"
+        return 1
+    fi
+}
+sync_nickel_light || true
 if [ -f "$STATE/native-restart" ]; then
     # Do not reset the radio underneath an already running Nickel.
     if ! pidof nickel >/dev/null 2>&1; then
