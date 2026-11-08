@@ -374,7 +374,7 @@ static int flush(Display *d,const uint8_t *cover){
             d->committed_valid=true;
             d->full=false;d->failures=0;d->refreshes++;
             if(plan.clean){d->last_clean=monotonic_ns();d->clean_refreshes++;}
-            d->last_animated=bands>0;
+            d->last_animated=animate&&bands>0;
             if(plan.night&&!plan.color)d->night_refreshes++;
             if(plan.color)d->color_refreshes++;else d->gray_refreshes++;
             if(cover)d->request_clean_at=0;
