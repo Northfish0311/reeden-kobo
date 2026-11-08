@@ -19,6 +19,9 @@ typedef struct {
     bool page_turn_vertical; unsigned page_turn_steps;
     unsigned animated_refreshes;
     bool direct_night; unsigned localized_color_refreshes;
+    /* A colour page that follows an animated grey page needs a full colour
+     * refresh, otherwise the first C16 pass looks washed out. */
+    bool last_animated;
     TurnOptions turn_options;
     FrameEvidenceOptions evidence_options;
     unsigned quality_refreshes;

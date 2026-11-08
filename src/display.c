@@ -272,6 +272,15 @@ static int flush(Display *d,const uint8_t *cover){
         plan.hw_invert=target_inverted;
     }
     RefreshPart parts[REFRESH_PARTS_MAX];unsigned part_count=0;
+    if(!cover&&plan.color&&d->last_animated){
+        /* The first C16 colour pass right after an animated grey page reads as
+         * washed out on this panel. Pay one full colour refresh so the page
+         * arrives at full saturation instead of recovering on a later turn. */
+        refresh_plan(d->committed_valid?d->committed:NULL,source,d->pending_stride,
+                     d->v.xres,d->v.yres,true,d->mode,&plan);
+        plan.hw_invert=false;
+        fprintf(stderr,"[display] colour page after animation: full colour refresh\n");
+    }
     if(!cover&&!plan.clean&&plan.major&&plan.frame_night&&plan.color&&!plan.hw_invert)
         part_count=refresh_night_parts(d->committed_valid?d->committed:NULL,source,
                                      d->pending_stride,d->v.xres,d->v.yres,parts);
@@ -365,6 +374,7 @@ static int flush(Display *d,const uint8_t *cover){
             d->committed_valid=true;
             d->full=false;d->failures=0;d->refreshes++;
             if(plan.clean){d->last_clean=monotonic_ns();d->clean_refreshes++;}
+            d->last_animated=bands>0;
             if(plan.night&&!plan.color)d->night_refreshes++;
             if(plan.color)d->color_refreshes++;else d->gray_refreshes++;
             if(cover)d->request_clean_at=0;
