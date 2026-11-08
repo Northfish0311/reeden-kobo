@@ -99,9 +99,22 @@ jobs:
           python install.py --help
           python uninstall.py --help
 
+  scripts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Shell syntax check
+        # A broken launcher or power helper only shows up on the device, where every
+        # recover cycle costs a reboot; catch it here in seconds.
+        run: |
+          for script in scripts/*.sh; do
+            echo "checking $script"
+            sh -n "$script" || exit 1
+          done
+
   release:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [python, verify, usb-tools]
+    needs: [python, verify, usb-tools, scripts]
     runs-on: ubuntu-latest
     permissions:
       contents: write

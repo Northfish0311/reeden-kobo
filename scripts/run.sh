@@ -4,6 +4,15 @@ set -u
 product=$(awk -F, '{print substr($NF,length($NF)-2)}' /mnt/onboard/.kobo/version 2>/dev/null)
 [ "$product" = 393 ] || { echo 'Only Kobo Clara Colour product 393 is supported; launch cancelled.'; exit 12; }
 mkdir -p "$APP/logs" "$STATE" "$APP/cache" "$APP/userdata" "$APP/storage/books" "$APP/storage/documents" "$APP/storage/screenshots" "$APP/userdata/.config" "$APP/userdata/.local/share" "$APP/userdata/.cache"
+# Keep the diagnostics directory and the append-only logs from growing forever on the
+# user partition: drop week-old hardware captures and rotate a log once it passes 256 KiB.
+find "$STATE" -maxdepth 1 -name 'hardware-events-*' -mtime +7 -exec rm -f {} + 2>/dev/null || true
+for log in power.log wifi.log native.log guardian.log; do
+    if [ -f "$APP/logs/$log" ] && [ "$(wc -c < "$APP/logs/$log")" -gt 262144 ]; then
+        mv -f "$APP/logs/$log" "$APP/logs/$log.1"
+    fi
+done
+STARTED_AT=$(date +%s)
 exec >> "$APP/logs/launcher.log" 2>&1
 echo "[launcher] $(date)"
 if [ -d "$STATE/active" ]; then
@@ -123,6 +132,8 @@ if [ -f "$STATE/ready" ]; then
     [ -d "$STATE/active" ] && [ ! -d "$STATE/recovering" ] && [ "$(cat "$STATE/owner" 2>/dev/null)" = "$$ $(token $$)" ] || exit 19
     : > "$STATE/handoff"
     echo '[launcher] first frame ready; hardware handoff authorized'
+    echo "[launcher] first frame took $(( $(date +%s) - STARTED_AT ))s"
+    : > "$STATE/first-frame-ok"
 fi
 wait "$HOST"
 code=$?

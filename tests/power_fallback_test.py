@@ -6,7 +6,12 @@ CPU awake all night, which costs far more than a fixed settle delay.
 """
 from pathlib import Path
 import subprocess
+import sys
 import tempfile
+
+if sys.platform == 'win32':
+    print('SKIP: the sysfs redirect harness needs a POSIX shell and paths')
+    raise SystemExit(0)
 
 root = Path(__file__).resolve().parents[1]
 source = (root / 'scripts/power.sh').read_text()
