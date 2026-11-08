@@ -22,18 +22,41 @@ chmod 755 "$APP"/*.sh "$APP"/bin/* "$APP"/runtime/* "$APP"/checks/* 2>/dev/null 
     exit 12
 }
 # Recheck on every launch: resources can disappear after first installation.
-if [ -f "$APP/integrity.sh" ]; then
-    expected=$(awk '$2 == "integrity.sh" {print $1; n++} END {if (n != 1) exit 1}' "$APP/SHA256SUMS") || exit 12
-    actual=$(sha256sum "$APP/integrity.sh") || exit 12
-    actual=${actual%% *}
-    [ "$actual" = "$expected" ] || { echo 'Integrity helper checksum failed; reinstall the package'; exit 12; }
-    sh "$APP/integrity.sh" repair > "$APP/install-verification.log" 2>&1 || {
-        echo 'Package checksum verification failed; see install-verification.log'
-        grep -E 'FAILED|INTEGRITY|No such file|WARNING' "$APP/install-verification.log" | head -n 12
-        exit 12
-    }
+# A full SHA-256 pass over ~484 files costs several seconds on the device, which is
+# most of the launch delay and used to eat into the first-frame budget. Keep the
+# repair path, but skip re-hashing when the manifest is unchanged and every listed
+# file still exists; run the full pass at least once a week or whenever that differs.
+VERIFY_STAMP="$STATE/verify-stamp"
+verify_manifest() {
+    if [ -f "$APP/integrity.sh" ]; then
+        expected=$(awk '$2 == "integrity.sh" {print $1; n++} END {if (n != 1) exit 1}' "$APP/SHA256SUMS") || exit 12
+        actual=$(sha256sum "$APP/integrity.sh") || exit 12
+        actual=${actual%% *}
+        [ "$actual" = "$expected" ] || { echo 'Integrity helper checksum failed; reinstall the package'; exit 12; }
+        sh "$APP/integrity.sh" repair > "$APP/install-verification.log" 2>&1 || {
+            echo 'Package checksum verification failed; see install-verification.log'
+            grep -E 'FAILED|INTEGRITY|No such file|WARNING' "$APP/install-verification.log" | head -n 12
+            exit 12
+        }
+    else
+        (cd "$APP" && sha256sum -c SHA256SUMS > "$APP/install-verification.log" 2>&1) || { echo "Package checksum verification failed; see install-verification.log"; exit 12; }
+    fi
+    printf '%s %s\n' "$1" "$(date +%s)" > "$VERIFY_STAMP"
+}
+stamp=$(cd "$APP" && sha256sum SHA256SUMS) || exit 12
+stamp=${stamp%% *}
+cached_stamp=""
+cached_age=999999
+if [ -f "$VERIFY_STAMP" ]; then
+    read -r cached_stamp cached_at < "$VERIFY_STAMP" || true
+    now=$(date +%s)
+    case "$cached_at" in ''|*[!0-9]*) cached_age=999999;; *) cached_age=$((now-cached_at));; esac
+fi
+if [ "$cached_stamp" = "$stamp" ] && [ "$cached_age" -lt 604800 ] && \
+   awk '{print $2}' "$APP/SHA256SUMS" | while IFS= read -r rel; do [ -f "$APP/$rel" ] || exit 1; done; then
+    echo '[verify] manifest unchanged and every file present; skipped full hashing'
 else
-    (cd "$APP" && sha256sum -c SHA256SUMS > "$APP/install-verification.log" 2>&1) || { echo "Package checksum verification failed; see install-verification.log"; exit 12; }
+    verify_manifest "$stamp"
 fi
 : > "$STATE/install-verified"
 "$APP/bin/fb-guard" --inspect || { echo "Unsupported framebuffer configuration"; exit 12; }
