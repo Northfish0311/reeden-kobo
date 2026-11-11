@@ -9,10 +9,11 @@
 
 extern uint64_t monotonic_ns(void);
 bool frame_evidence_options_load(FrameEvidenceOptions *out){
-    FrameEvidenceOptions o={.limit=2};
+    FrameEvidenceOptions o={.limit=2,.quality_every=1};
     const char *dir=getenv("REEDEN_FRAME_EVIDENCE_DIR");
     const char *limit=getenv("REEDEN_FRAME_EVIDENCE_LIMIT");
     const char *quality=getenv("REEDEN_TEXT_QUALITY_AFTER_TURN");
+    const char *every=getenv("REEDEN_TEXT_QUALITY_EVERY");
     const char *band=getenv("REEDEN_TEXT_BAND_PATH");
     if(dir){
         if(dir[0]!='/'||strlen(dir)>=sizeof(o.directory))goto invalid;
@@ -25,6 +26,12 @@ bool frame_evidence_options_load(FrameEvidenceOptions *out){
     if(quality){
         if(strcmp(quality,"0")&&strcmp(quality,"1"))goto invalid;
         o.quality_after_turn=!strcmp(quality,"1");
+    }
+    /* The cleanup pass costs one whole-page refresh, so let the device run it on
+     * every Nth turn instead of on every turn. */
+    if(every){
+        if(strlen(every)!=1||*every<'1'||*every>'9')goto invalid;
+        o.quality_every=(unsigned)(*every-'0');
     }
     if(band){
         if(strcmp(band,"stable")&&strcmp(band,"reagl"))goto invalid;

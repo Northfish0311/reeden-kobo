@@ -8,11 +8,15 @@ port_ver=$(sed -n 's/.*"port_version":[[:space:]]*"\([^"]*\)".*/\1/p' "$APP/buil
 echo "=== Reeden Kobo ${port_ver:-unknown} Self-Check ==="
 
 # 1. Model & Firmware
+fw_baseline=$(sed -n 's/.*"firmware":[[:space:]]*"\([^"]*\)".*/\1/p' "$APP/build-info.json" 2>/dev/null | head -n 1)
 if [ -f /mnt/onboard/.kobo/version ]; then
     fw=$(awk -F, '{print $3}' /mnt/onboard/.kobo/version 2>/dev/null)
     product=$(awk -F, '{print substr($NF,length($NF)-2)}' /mnt/onboard/.kobo/version 2>/dev/null)
     if [ "$product" = "393" ]; then
         echo "[OK] Model: Clara Colour (393), FW $fw"
+        if [ -n "${fw_baseline:-}" ] && [ "$fw" != "$fw_baseline" ]; then
+            echo "[WARN] FW $fw differs from the validated baseline $fw_baseline"
+        fi
     else
         echo "[FAIL] Model code: $product (FW $fw) - Only 393 supported"
     fi

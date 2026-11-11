@@ -4,6 +4,10 @@ read -r OWNER OWNER_TOKEN < "$STATE/owner" || exit 1
 GENERATION="$OWNER $OWNER_TOKEN"
 started=$(date +%s)
 first_update=false
+# The first launch after an install or upgrade has no warm cache and pays the full
+# verification pass, so give it a longer budget than a warm relaunch.
+FIRST_UPDATE_LIMIT=30
+[ -f "$STATE/first-frame-ok" ] || FIRST_UPDATE_LIMIT=60
 while [ -d "$STATE/active" ]; do
     now=$(date +%s)
     if ! same_process "$OWNER" "$OWNER_TOKEN"; then break; fi
@@ -11,8 +15,8 @@ while [ -d "$STATE/active" ]; do
     # Backup deadline if launcher stalls. Most failures now leave Nickel running.
     if [ "$first_update" = false ]; then
         if grep -q FIRST_UPDATE_SUBMITTED "$APP/logs/current.log"; then first_update=true
-        elif [ $((now-started)) -ge 30 ]; then
-            echo "[guardian] first-update timeout" >> "$APP/logs/launcher.log"; break
+        elif [ $((now-started)) -ge "$FIRST_UPDATE_LIMIT" ]; then
+            echo "[guardian] first-update timeout after $((now-started))s (limit ${FIRST_UPDATE_LIMIT}s)" >> "$APP/logs/launcher.log"; break
         fi
     fi
     heartbeat="/tmp/reeden-kobo-${HOST:-none}.heartbeat"

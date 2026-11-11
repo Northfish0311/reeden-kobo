@@ -272,6 +272,15 @@ static int flush(Display *d,const uint8_t *cover){
         plan.hw_invert=target_inverted;
     }
     RefreshPart parts[REFRESH_PARTS_MAX];unsigned part_count=0;
+    if(!cover&&plan.color&&d->last_animated){
+        /* The first C16 colour pass right after an animated grey page reads as
+         * washed out on this panel. Pay one full colour refresh so the page
+         * arrives at full saturation instead of recovering on a later turn. */
+        refresh_plan(d->committed_valid?d->committed:NULL,source,d->pending_stride,
+                     d->v.xres,d->v.yres,true,d->mode,&plan);
+        plan.hw_invert=false;
+        fprintf(stderr,"[display] colour page after animation: full colour refresh\n");
+    }
     if(!cover&&!plan.clean&&plan.major&&plan.frame_night&&plan.color&&!plan.hw_invert)
         part_count=refresh_night_parts(d->committed_valid?d->committed:NULL,source,
                                      d->pending_stride,d->v.xres,d->v.yres,parts);
@@ -336,6 +345,7 @@ static int flush(Display *d,const uint8_t *cover){
          * never acquire an extra update. quality_status: 0=off/skipped,
          * 1=completed, 2=send rejected, 3=completion failed. */
         if(bands==1&&animate&&d->evidence_options.quality_after_turn&&
+           (d->evidence_options.quality_every<2||d->refreshes%d->evidence_options.quality_every==0)&&
            d->v.xres==1072&&d->v.yres==1448&&d->v.rotate==3){
             struct update q={.region={0,0,d->v.xres,d->v.yres},
                 .waveform=plan.night?REFRESH_GLKW16:REFRESH_GLR16,.mode=1,.marker=next_marker(d)};
@@ -364,6 +374,7 @@ static int flush(Display *d,const uint8_t *cover){
             d->committed_valid=true;
             d->full=false;d->failures=0;d->refreshes++;
             if(plan.clean){d->last_clean=monotonic_ns();d->clean_refreshes++;}
+            d->last_animated=animate&&bands>0;
             if(plan.night&&!plan.color)d->night_refreshes++;
             if(plan.color)d->color_refreshes++;else d->gray_refreshes++;
             if(cover)d->request_clean_at=0;

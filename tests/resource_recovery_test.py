@@ -453,6 +453,23 @@ rmdir "$APP/state/active" || exit 1
                 for rel in ("userdata/notes.json", "storage/books/book.epub"):
                     self.assertEqual((self.app / rel).read_bytes(), self.protected[rel])
 
+    def test_empty_recovery_clears_a_leftover_lock(self):
+        # Recovery may find nothing to do and exit 0 while leaving state/active behind.
+        # Every later launch must still start instead of looking like it did nothing.
+        self.prepare_launcher('''
+APP=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+exit 0
+''')
+        self.write("state/owner", b"999999 1\n")
+        (self.app / "state/active").mkdir()
+        self.remove_six()
+        code, output = self.run_shell("run.sh")
+        log = (self.app / "logs/launcher.log").read_text()
+        self.assertEqual(code, 13, output + log)
+        self.assertIn("clearing stale session state", log)
+        self.assertFalse((self.app / "state/active").exists())
+        self.assert_restored()
+
     def test_failed_or_busy_session_blocks_resource_repair(self):
         self.prepare_launcher('''
 APP=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)

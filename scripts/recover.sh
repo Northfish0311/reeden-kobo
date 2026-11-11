@@ -10,20 +10,21 @@ fi
 mkdir -p "$STATE/recovering" || exit 1
 trap 'rmdir "$STATE/recovering" 2>/dev/null || :' EXIT
 echo "[recovery] restoring this session" >> "$APP/logs/launcher.log"
-choice_light=-1; choice_warm=-1; choice_wifi=-1
+choice_light=-1; choice_warm=-1; choice_wifi=-1; clean_exit=false
 if ! owned_host && [ -f "$STATE/handoff" ] && [ ! -f "$STATE/asleep" ] &&
    [ -f "$STATE/clean-exit" ] && [ ! -L "$STATE/clean-exit" ] && [ -f "$STATE/host" ]; then
     read -r host_pid host_start < "$STATE/host"
     if read -r exit_pid level warm radio extra < "$STATE/clean-exit" &&
        [ "$exit_pid" = "$host_pid" ] && [ -n "$host_pid" ] && [ -z "$extra" ]; then
         choice_light=$level; choice_warm=$warm; choice_wifi=$radio
+        clean_exit=true
     fi
 fi
 valid_level() {
     case "$1" in ''|*[!0-9]*|????*) return 1;; esac
     [ "$1" -le "$2" ]
 }
-restore_light() {
+restore_lights() {
     [ -f "$STATE/light" ] || return 0
     read -r brightness warmth < "$STATE/light" || return 0
     if valid_level "$choice_light" 100; then brightness=$choice_light; fi
@@ -43,6 +44,47 @@ if [ -f "$STATE/night-invert" ]; then
     if printf 'night_mode 0' > /proc/hwtcon/cmd; then rm -f "$STATE/night-invert"; fi
 fi
 radio_failed=false
+# Nickel re-applies the brightness stored in its own configuration when it starts,
+# which is why a level chosen inside the reader was lost on exit. Write the hardware
+# level into [PowerOptions] first so both UIs agree.
+sync_nickel_light() {
+    [ "$clean_exit" = true ] && valid_level "$choice_light" 100 && [ "$choice_light" -gt 0 ] || return 0
+    cfg=${NICKEL_CONF:-/mnt/onboard/.kobo/Kobo/Kobo eReader.conf}
+    [ -f "$cfg" ] && [ ! -L "$cfg" ] || return 0
+    light_path=${LIGHT_PATH:-/sys/class/backlight/mxc_msp430.0/brightness}
+    [ -r "$light_path" ] || return 0
+    level=$(cat "$light_path" 2>/dev/null) || return 0
+    case "$level" in ''|*[!0-9]*) return 0;; esac
+    [ "$level" -gt 0 ] && [ "$level" -le 100 ] || return 0
+    [ "$level" = "$choice_light" ] || return 0
+    light_state=true
+    current=$(awk '/^\[PowerOptions\]/{po=1;next} /^\[/{po=0} po&&/^FrontLightLevel[ \t]*=/{split($0,a,"=");gsub(/[ \t]/,"",a[2]);print a[2];exit}' "$cfg" 2>/dev/null)
+    [ "$current" = "$level" ] && return 0
+    tmp=$(mktemp "$cfg.reeden-XXXXXX") || return 1
+    cp -p "$cfg" "$tmp" || { rm -f "$tmp"; return 1; }
+    awk -v level="$level" -v state="$light_state" '
+        { lines[NR]=$0 }
+        END {
+            for (i=1;i<=NR;i++) {
+                line=lines[i]
+                if (line ~ /^\[PowerOptions\][ \t]*$/) {
+                    print line; print "FrontLightLevel=" level; print "FrontLightState=" state
+                    inpo=1; found=1; continue
+                }
+                if (line ~ /^\[/) { inpo=0 }
+                if (inpo && line ~ /^FrontLight(Level|State)[ \t]*=/) { continue }
+                print line
+            }
+            if (!found) { print "[PowerOptions]"; print "FrontLightLevel=" level; print "FrontLightState=" state }
+        }' "$cfg" > "$tmp" || { rm -f "$tmp"; return 1; }
+    if [ -s "$tmp" ] && mv -f "$tmp" "$cfg"; then
+        echo "[recovery] Nickel brightness updated to $level" >> "$APP/logs/launcher.log"
+    else
+        rm -f "$tmp"
+        echo "[recovery] Nickel brightness update failed; hardware value kept" >> "$APP/logs/launcher.log"
+        return 1
+    fi
+}
 if [ -f "$STATE/native-restart" ]; then
     starting_native=false
     # Do not reset the radio underneath an already running Nickel.
@@ -55,7 +97,8 @@ if [ -f "$STATE/native-restart" ]; then
             radio_failed=true
             echo "[recovery] native Wi-Fi handoff failed; continuing native UI restoration" >> "$APP/logs/launcher.log"
         fi
-        restore_light
+        restore_lights
+        sync_nickel_light || true
     fi
     if ! "$APP/native-session.sh" start; then
         echo "[recovery] native restart failed; session state retained for retry" >> "$APP/logs/launcher.log"
@@ -75,7 +118,7 @@ if [ -f "$STATE/native-restart" ]; then
     fi
 elif [ -s "$STATE/paused" ]; then
     # Restore framebuffer while Nickel is still paused, then resume exact PIDs.
-    restore_light
+    restore_lights
     if [ -f "$STATE/framebuffer" ]; then
         "$APP/bin/fb-guard" --restore "$STATE/framebuffer" >> "$APP/logs/launcher.log" 2>&1 &
         refresh=$!

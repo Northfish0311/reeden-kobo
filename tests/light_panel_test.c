@@ -10,6 +10,8 @@
 
 enum { W=1072,H=1448,ROW=W*4 };
 static int raw_color=8,max_color=10,writes,invalidations;
+static int choice=-1;
+static void user_warmth(int raw){choice=raw;}
 static uint8_t *frame;
 static int read_fake(const char *path,int fallback){
     (void)fallback;
@@ -42,10 +44,11 @@ int main(void){
     char root[]="/tmp/reeden-light-test-XXXXXX";assert(mkdtemp(root));
     char data[4096],file[4096];snprintf(data,sizeof(data),"%s/userdata",root);assert(!mkdir(data,0700));snprintf(file,sizeof(file),"%s/userdata/kobo-light.conf",root);
     frame=malloc((size_t)ROW*H);assert(frame);
-    LightPanelOps ops={.read_number=read_fake,.write_number=write_fake,.invalidate=invalidate_fake};
+    LightPanelOps ops={.read_number=read_fake,.write_number=write_fake,.invalidate=invalidate_fake,.user_warmth=user_warmth};
     light_panel_init(root,ops);assert(writes==0); /* Warmup has no hardware writes. */
     make_panel();assert(!light_panel_compose(frame,ROW,W,H));
     light_panel_acquired();assert(writes==1&&raw_color==8);
+    assert(choice==-1);
     assert(light_row_offsets[11]==sizeof(light_row_rle));
     make_panel();assert(light_panel_compose(frame,ROW,W,H));
     /* The moved original frontlight must keep its original Flutter target. */
@@ -56,6 +59,7 @@ int main(void){
     assert(raw_color==0&&invalidations==1);
     point(kMove,2,236,568,true,568);assert(raw_color==10&&invalidations==2);
     point(kUp,2,236,568,true,568);point(kRemove,2,236,568,true,568);
+    assert(choice==10);
     FILE *f=fopen(file,"r");int saved=-1;assert(f&&fscanf(f,"warmth=%d",&saved)==1&&saved==0);fclose(f);
     point(kAdd,3,1004,568,true,568);point(kDown,3,1004,568,true,568);
     point(kUp,3,1004,568,true,568);point(kRemove,3,1004,568,true,568);assert(raw_color==9);
