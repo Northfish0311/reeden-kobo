@@ -1,4 +1,5 @@
 #define _GNU_SOURCE
+#undef NDEBUG
 #include <assert.h>
 #include <fcntl.h>
 #include <stdarg.h>

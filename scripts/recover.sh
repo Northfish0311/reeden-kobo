@@ -20,6 +20,15 @@ if ! owned_host && [ -f "$STATE/handoff" ] && [ ! -f "$STATE/asleep" ] &&
         clean_exit=true
     fi
 fi
+if [ -f "$STATE/handoff" ] && [ -f "$STATE/host" ] &&
+   [ -f "$STATE/wifi-choice" ] && [ ! -L "$STATE/wifi-choice" ]; then
+    read -r host_pid host_start < "$STATE/host"
+    if read -r choice_pid choice_start radio extra < "$STATE/wifi-choice" &&
+       [ -n "$host_pid" ] && [ -n "$host_start" ] && [ -z "$extra" ] &&
+       [ "$choice_pid" = "$host_pid" ] && [ "$choice_start" = "$host_start" ]; then
+        case "$radio" in 0|1) choice_wifi=$radio;; esac
+    fi
+fi
 valid_level() {
     case "$1" in ''|*[!0-9]*|????*) return 1;; esac
     [ "$1" -le "$2" ]
@@ -110,8 +119,10 @@ if [ -f "$STATE/native-restart" ]; then
         esac
         if [ "$request" != none ]; then
             if "$APP/native-session.sh" wifi-choice "$request"; then
-                echo '[recovery] native Wi-Fi preference requested; connection unverified' >> "$APP/logs/launcher.log"
+                printf '%s\n' "$request" > "$STATE/native-wifi-result"
+                echo '[recovery] native Wi-Fi interface state verified; Internet access not assumed' >> "$APP/logs/launcher.log"
             else
+                echo unavailable > "$STATE/native-wifi-result"
                 echo '[recovery] native Wi-Fi preference unavailable; Nickel retains control' >> "$APP/logs/launcher.log"
             fi
         fi
@@ -142,7 +153,7 @@ elif [ -s "$STATE/paused" ]; then
         [ "$phase" != nickel ] || sleep 1
     done
 fi
-rm -f "$STATE/clean-exit" "$STATE/native-was-connected" "$STATE/cover-closed"
+rm -f "$STATE/clean-exit" "$STATE/native-was-connected" "$STATE/cover-closed" "$STATE/wifi-choice"
 rm -f "$STATE/host" "$STATE/owner" "$STATE/paused" "$STATE/light" "$STATE/framebuffer" "$STATE/heartbeat" "$STATE/ready" "$STATE/handoff" "$STATE/asleep" "$STATE/power-cancel" "$STATE/power-phase" "$STATE/power-phase.new" "$STATE/native-restart" "$STATE/native-env" "$STATE/native-pids"
 rmdir "$STATE/active" || { echo "[recovery] active state could not be cleared" >> "$APP/logs/launcher.log"; exit 1; }
 if [ "$radio_failed" = true ] || [ -f "$STATE/native-wifi-pending" ]; then

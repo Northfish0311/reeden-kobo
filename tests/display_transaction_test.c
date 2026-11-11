@@ -14,6 +14,7 @@
 
 volatile int app_quit;
 bool light_panel_compose(uint8_t *p,size_t s,unsigned w,unsigned h){(void)p;(void)s;(void)w;(void)h;return false;}
+bool system_panel_compose(uint8_t *p,size_t s,unsigned w,unsigned h){(void)p;(void)s;(void)w;(void)h;return false;}
 static FILE *command_file;
 static bool inverted,in_flight,fail_inversion;
 static unsigned submitted,completed,last_wave,last_flags,commands;

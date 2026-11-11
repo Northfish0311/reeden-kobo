@@ -96,7 +96,7 @@ rm -f "$STATE/host" "$STATE/heartbeat" "$STATE/ready" "$STATE/handoff" "$STATE/a
 if [ -f "$APP/logs/current.log" ]; then mv -f "$APP/logs/current.log" "$APP/logs/previous.log"; fi
 : > "$APP/logs/current.log"
 REEDEN_CHOICES=
-rm -f "$STATE/cover-closed"
+rm -f "$STATE/cover-closed" "$STATE/wifi-choice"
 finish_session() {
     "$APP/recover.sh"
     if [ -n "$REEDEN_CHOICES" ]; then

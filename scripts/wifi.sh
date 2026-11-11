@@ -19,6 +19,7 @@ wifi_connected() {
       END { exit !ok }'
 }
 case "$mode" in
+probe) if ! wifi_up; then exit 10; elif wifi_connected; then exit 12; else exit 11; fi;;
 enabled) if wifi_up; then echo 1; else echo 0; fi; exit 0;;
 status) if wifi_connected; then echo CONNECTED; else echo NA; fi; exit 0;;
 signal)
@@ -141,10 +142,22 @@ wifi_on() {
     timeout 3 dhcpcd -d -b -t 15 wlan0 || return 1
     echo '[wifi] association/DHCP started; connection is not yet assumed'
 }
+record_choice() {
+    # Persist only successful explicit toggles, tied to this host generation.
+    # Suspend/resume may change the radio temporarily, but not the user's choice.
+    app_owner || return 1
+    case "${HOST:-}:${HOST_TOKEN:-}" in *[!0-9:]*|:*|*:) return 1;; esac
+    choice_tmp=$(mktemp "$STATE/wifi-choice.XXXXXX") || return 1
+    if ! printf '%s %s %s\n' "$HOST" "$HOST_TOKEN" "$1" > "$choice_tmp" ||
+       ! mv -f "$choice_tmp" "$STATE/wifi-choice"; then
+        rm -f "$choice_tmp"; return 1
+    fi
+    [ -z "${REEDEN_CHOICES:-}" ] || printf '%s\n' "$1" > "$REEDEN_CHOICES/wifi"
+}
 case "$mode" in
 off) wifi_off || exit 1
      rm -f "$STATE/wifi-restore"
-     [ -z "${REEDEN_CHOICES:-}" ] || echo 0 > "$REEDEN_CHOICES/wifi";;
+     record_choice 0;;
 suspend) wifi_off;;
 native)
     if [ "$(wifi_handoff_mode)" = keep ]; then
@@ -154,6 +167,6 @@ native)
         wifi_off
     fi;;
 on) wifi_on || exit 1
-    [ -z "${REEDEN_CHOICES:-}" ] || echo 1 > "$REEDEN_CHOICES/wifi";;
+    record_choice 1;;
 resume) wifi_on;;
 esac

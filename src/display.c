@@ -1,6 +1,7 @@
 #include "kobo.h"
 #include "refresh_policy.h"
 #include "light_panel.h"
+#include "system_panel.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -95,6 +96,7 @@ bool display_present(Display *d,const void *pixels,size_t row,size_t height){
         if(!d->frames||memcmp(dst,src,d->pending_stride)){memcpy(dst,src,d->pending_stride);changed=true;}
     }
     if(d->use_light_overlay&&light_panel_compose(d->pending,d->pending_stride,d->v.xres,d->v.yres))changed=true;
+    if(system_panel_compose(d->pending,d->pending_stride,d->v.xres,d->v.yres))changed=true;
     if(changed){uint64_t now=monotonic_ns();if(!d->dirty)d->first_dirty=now;d->dirty=true;d->last_present=now;
         if(d->turn_options.trace&&d->page_turn_direction){if(!d->turn_first_frame_ns)d->turn_first_frame_ns=arrived;d->turn_last_frame_ns=arrived;}}
     d->frames++;

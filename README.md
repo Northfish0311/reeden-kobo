@@ -1,15 +1,17 @@
 # Reeden Kobo 社区改进分支
 
-本仓库基于 **SSNQ** 的 [Reeden Kobo](https://github.com/SSNQ/reeden-kobo)。当前社区版 **v0.7.8-community.2** 合入原作者 v0.7.8 的缺失资源恢复和启动校验，并保留社区的一键更新、菜单保护、锁屏和异常恢复修复，面向 **Kobo Clara Colour（393）**。
+本仓库基于 **SSNQ** 的 [Reeden Kobo](https://github.com/SSNQ/reeden-kobo)，面向 **Kobo Clara Colour（393）**。当前社区版 **v0.7.9-community.4** 在 community.3 基础上新增设备控制面板、合盖锁屏和待机保护，并整合亮度与 Wi-Fi 交接。已有启动提速、资源恢复、彩色页刷新和保留数据升级继续保留。
 
 **非官方、实验性项目。** 不代表 SSNQ 已接受本分支修改，也不代表 Reeden 或 Kobo 官方支持、授权合作或产品背书。原作者署名、MIT 许可证及第三方许可声明均予保留；不附带 Reeden 官方闭源核心，不修改其账号、付费或授权逻辑。详情见 [来源、修改范围与风险声明](docs/FORK-NOTES.md)。
 
-- **下载：** 在[社区版下载页](https://github.com/Northfish0311/reeden-kobo/releases/tag/v0.7.8-community.2)选择文件名以 **OneClick.zip** 结尾的附件并完整解压；也可[下载本版本的代码包](https://github.com/Northfish0311/reeden-kobo/archive/refs/tags/v0.7.8-community.2.zip)。电脑需 Python 3.10+，Kobo 需已安装 NickelMenu。先备份重要书库和笔记。首次使用双击「一键安装」；详情见[安装说明](docs/安装与卸载.md)。
+- **下载：** 在[社区版下载页](https://github.com/Northfish0311/reeden-kobo/releases/tag/v0.7.9-community.4)选择文件名以 **OneClick.zip** 结尾的附件并完整解压；也可[下载本版本的代码包](https://github.com/Northfish0311/reeden-kobo/archive/refs/tags/v0.7.9-community.4.zip)。电脑需 Python 3.10+，Kobo 需已安装 NickelMenu。先备份重要书库和笔记。首次使用双击「一键安装」；详情见[安装说明](docs/安装与卸载.md)。
 - **已经安装，想更新：** 下载新版 ZIP 并解压 → 退出 Kobo 上的 Reeden、连接 USB 并点“连接” → 双击 **一键更新-Windows.bat**。macOS 用 **一键更新-macOS.command**，Linux 用 `sh 一键更新-Linux.sh`。不需输入参数，自动保留书库、进度与旧版备份；完成后安全弹出。此入口安装当前 ZIP 中的版本，不会自动下载新版工具，详见 [更新说明](docs/安装与卸载.md#保留数据升级)。
 - **提交给原作者：** [安装器 PR #1](https://github.com/SSNQ/reeden-kobo/pull/1)；[阅读器恢复与锁屏 PR #2](https://github.com/SSNQ/reeden-kobo/pull/2)。是否合并由原作者决定。
 - **验证范围：** 发布流程运行 Windows、macOS、Linux 模拟 USB 安装与升级、Linux 故障注入、ARMHF 重新构建及 QEMU 测试；以[对应提交的 Actions](https://github.com/Northfish0311/reeden-kobo/actions/workflows/ci.yml)为准。**本社区整合版仍待实机验收**，原作者的 v0.7.8 真机记录不能替代本分支的设备测试。
 
-**当前已知限制：** 社区版没有改写 Reeden 的规则引擎，也没有解决水波纹翻页残影。它保留了[通过 USB 选择翻页模式](docs/翻页动画AB测试流程.md#在设备上切换不需要-ssh)的入口，不默认追加整页刷新。用户报告耗电偏高；本版没有续航改善的实测数据。Wi-Fi 在退出时交还原生系统，亮度和色温尝试恢复启动前的值，不是两边实时同步。详见[实机核对方法](docs/测试说明.md#耗电与原生设置)。
+**不退出 Reeden，也能控制设备：** 从屏幕**顶部中间向下滑**，打开“设备控制”。点击 Wi-Fi 开关直接控制 Kobo 的无线接口；“已开启，未连接”和“已连接”分别显示，点右上角“刷新”重新读取状态。新热点或密码仍先在 Kobo 原生系统里配置。面板还可“立即锁屏”；识别到支持的内部保护盖传感器后，合盖锁屏、开盖恢复默认启用，无须退出阅读器。功能仍属实验性，详见[使用与验收说明](docs/releases/v0.7.9-community.4.md)。
+
+**当前已知限制：** 面板开关控制真实硬件，不是只改图标；返回原生系统后继续沿用 Wi-Fi 选择则需要已安装的 [NickelDBus](https://github.com/shermp/NickelDBus)，缺少它时不能保证原生开关同步。本项目不会静默安装该插件或改写不明配置。Reeden 运行时原生界面不同时运行，不存在两套界面同时操作无线。USB 充电时只锁屏，不强制深睡；合盖唤醒和隔夜耗电仍待实机验收。没有宣称修复水波纹残影或规则卡死；[USB 翻页模式](docs/翻页动画AB测试流程.md#在设备上切换不需要-ssh)仍保留。
 
 以下保留上游 0.7.8 的说明和历史记录。下文 SSNQ 的发布附件是**原作者版本**；请使用本页顶部的社区版链接下载本次修复。
 
@@ -44,7 +46,7 @@ v0.7.5 已整合 Wi-Fi 桥接、夜间彩字分区刷新、翻页动画与文字
 - 程序及阅读数据安装在用户分区 `.adds/reeden-kobo`，菜单在 `.adds/nm/reeden-kobo`。不替换固件、系统库或开机启动项，不设置开机自启。运行时需要控制屏幕、触摸、电源和网络；恢复网络时可能回写 `/etc/resolv.conf`，恢复 DNS。
 - 开始前备份重要书籍和笔记。升级会保留旧安装和数据副本，需要足够剩余空间；不要在 Reeden 运行期间升级，也不要在写入时拔线。
 - 默认菜单不再提供开启 SSH 的入口，只保留 **Reeden SSH - Stop** 以便关闭旧版监听服务。可选诊断工具仅允许密钥认证，见 [SSH 说明](docs/SSH.md)。升级不自动终止现有 SSH 会话，旧服务需手动停止或重启设备。
-- [下载社区修复版](https://github.com/Northfish0311/reeden-kobo/releases/tag/v0.7.8-community.2)。不要混用不同版本的源码和安装附件。
+- [下载社区修复版](https://github.com/Northfish0311/reeden-kobo/releases/tag/v0.7.9-community.4)。不要混用不同版本的源码和安装附件。
 
 ### 退出和故障恢复
 

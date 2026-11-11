@@ -24,7 +24,7 @@ enum lock_result power_lock_result(int status,bool wake_requested,bool retried,b
     return LOCK_KEEP;
 }
 
-static pid_t start_helper(const char *path,const char *action_name){
+pid_t power_worker_command(const char *path,const char *action_name){
     /* Linux clone with no exit signal creates a separate wait class. No
      * memory, file descriptor table or signal handlers are shared. Linux
      * resets the exit signal during exec, so this supervisor MUST NOT exec.
@@ -55,8 +55,8 @@ static pid_t start_helper(const char *path,const char *action_name){
     }
     return pid;
 }
-pid_t power_worker_start(const char *path){return start_helper(path,"suspend");}
-pid_t power_worker_restore_wifi(const char *path){return start_helper(path,"restore");}
+pid_t power_worker_start(const char *path){return power_worker_command(path,"suspend");}
+pid_t power_worker_restore_wifi(const char *path){return power_worker_command(path,"restore");}
 pid_t power_worker_poll(pid_t pid,int *status){
     return waitpid(pid,status,WNOHANG|__WCLONE);
 }

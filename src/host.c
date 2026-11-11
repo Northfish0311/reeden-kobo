@@ -5,6 +5,7 @@
 #include "light_panel.h"
 #include "power_worker.h"
 #include "cover.h"
+#include "system_panel.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -47,6 +48,11 @@ static unsigned cover_width,cover_height,cover_channels=1;
 static int saved_brightness=-1;
 static pid_t power_worker=-1;
 static pid_t radio_worker=-1;
+static pid_t wifi_worker=-1;
+#ifndef REEDEN_HEADLESS_DIAGNOSTIC
+static enum panel_action panel_request=PANEL_NONE,wifi_action=PANEL_NONE;
+static enum panel_wifi wifi_state=PANEL_UNKNOWN;
+#endif
 static char heartbeat_path[4096];
 static void respond(const FlutterPlatformMessage *,const void *,size_t);
 static void empty_reply(const FlutterPlatformMessage *);
@@ -55,6 +61,20 @@ static void heartbeat_touch(void){
     if(fd>=0){futimens(fd,NULL);close(fd);}
 }
 #ifndef REEDEN_HEADLESS_DIAGNOSTIC
+static void panel_changed(void *u){
+    Display *d=u;pthread_mutex_lock(&d->lock);
+    if(system_panel_redraw(d->pending,d->pending_stride,d->v.xres,d->v.yres)){
+        uint64_t now=monotonic_ns();if(!d->dirty)d->first_dirty=now;
+        d->dirty=true;d->last_present=now;d->full=true;
+    }
+    pthread_mutex_unlock(&d->lock);
+}
+static void panel_command(enum panel_action action){panel_request=action;}
+static void panel_forward(const FlutterPointerEvent *p){FlutterEngineSendPointerEvent(engine,p,1);}
+static bool panel_pointer(FlutterPointerEvent *p){
+    if(system_panel_pointer(p))return true;
+    return screen.use_light_overlay&&light_panel_pointer(p);
+}
 static void light_panel_changed(void *u){
     Display *d=u;pthread_mutex_lock(&d->lock);
     if(light_panel_redraw(d->pending,d->pending_stride,d->v.xres,d->v.yres)){
@@ -116,6 +136,9 @@ static void sleep_cover_channel(const FlutterPlatformMessage *m,const char *meth
 }
 static void set_sleep(Touch *touch,bool asleep){
     if(sleeping==asleep)return;
+#ifndef REEDEN_HEADLESS_DIAGNOSTIC
+    if(asleep){system_panel_hide();panel_request=PANEL_NONE;}
+#endif
     sleeping=asleep;
     wake_requested=false;retried_suspend=false;suspend_at=0;
     if(asleep){
@@ -336,7 +359,8 @@ int main(int argc,char **argv){
     if(screen.turn_options.trace)touch_set_observer(observe_input);
     memset(&touch,0,sizeof(touch));touch.fd=-1;
     light_panel_init(root,(LightPanelOps){.read_number=read_number,.write_number=write_number,.invalidate=light_panel_changed,.userdata=&screen,.user_warmth=remember_warmth});
-    touch_set_filter(light_panel_pointer);
+    system_panel_init((SystemPanelOps){.invalidate=panel_changed,.request=panel_command,.forward=panel_forward,.userdata=&screen});
+    touch_set_filter(panel_pointer);
 #endif
     char assets[4096],icu[4096],aot_path[4096],cache[4096],ver_path[4096];
     char core[4096];snprintf(core,sizeof(core),"%s/core",root);const char *bundle=getenv("REEDEN_BUNDLE_DIR");if(!bundle)bundle=core;
@@ -346,7 +370,6 @@ int main(int argc,char **argv){
     bool core_is_1431=false;
     {FILE *vf=fopen(ver_path,"r");if(vf){char vbuf[256]={0};size_t vn=fread(vbuf,1,sizeof(vbuf)-1,vf);fclose(vf);if(vn>0&&strstr(vbuf,"\"1.43.1\""))core_is_1431=true;}}
     screen.use_light_overlay=core_is_1431;
-    if(!core_is_1431)touch_set_filter(NULL);
 #else
     (void)ver_path;
 #endif
@@ -386,6 +409,18 @@ int main(int argc,char **argv){
     while(!app_quit){
         if(monotonic_ns()>heartbeat_at){heartbeat_touch();heartbeat_at=monotonic_ns()+5000000000ULL;}
 #ifndef REEDEN_HEADLESS_DIAGNOSTIC
+        if(wifi_worker>0){
+            int status=0;pid_t result=power_worker_poll(wifi_worker,&status);
+            if(result==wifi_worker||(result<0&&errno!=EINTR)){
+                int code=result>0&&WIFEXITED(status)?WEXITSTATUS(status):-1;
+                wifi_worker=-1;
+                bool ok=wifi_action==PANEL_PROBE?(code>=10&&code<=12):code==0;
+                if(wifi_action==PANEL_PROBE)wifi_state=ok?(enum panel_wifi)(code-9):PANEL_UNKNOWN;
+                system_panel_network(wifi_state,false,!ok);
+                if(ok&&wifi_action!=PANEL_PROBE&&!sleeping&&panel_request==PANEL_NONE&&system_panel_visible())panel_request=PANEL_PROBE;
+                fprintf(stderr,"[wifi] panel helper finished action=%d result=%d\n",wifi_action,code);
+            }
+        }
         if(radio_worker>0){
             int status;pid_t result=power_worker_poll(radio_worker,&status);
             if(result==radio_worker||(result<0&&errno!=EINTR)){
@@ -430,8 +465,10 @@ int main(int argc,char **argv){
             if(power<0||ioctl(power,EVIOCGRAB,1)<0){perror("exclusive power key");app_quit=1;break;}
             fprintf(stderr,"[power] exclusive power key acquired\n");
             char no_cover[4096];snprintf(no_cover,sizeof(no_cover),"%s/userdata/no-sleep-cover",root);
-            if(access(no_cover,F_OK)!=0)cover_open(&cover,power,touch.fd);
+            bool cover_enabled=access(no_cover,F_OK)!=0;
+            if(cover_enabled)cover_open(&cover,power,touch.fd);
             else fprintf(stderr,"[cover] disabled by user preference\n");
+            system_panel_available(true,cover_enabled?(cover.fd>=0?1:-1):0);
             light_panel_acquired();
         }
         enum cover_edge edge=cover_settled(&cover,monotonic_ns());
@@ -445,6 +482,14 @@ int main(int argc,char **argv){
             state_file("cover-closed",false);
             if(sleeping&&power_worker>0){wake_requested=true;state_file("power-cancel",true);}
             else if(sleeping)set_sleep(&touch,false);
+        }
+        if(acquired&&!sleeping&&panel_request==PANEL_LOCK){panel_request=PANEL_NONE;set_sleep(&touch,true);}
+        if(acquired&&!sleeping&&panel_request!=PANEL_NONE&&wifi_worker<0&&radio_worker<0&&power_worker<0){
+            char helper[4096];snprintf(helper,sizeof(helper),"%s/wifi.sh",root);
+            wifi_action=panel_request;panel_request=PANEL_NONE;
+            const char *action=wifi_action==PANEL_WIFI_ON?"on":wifi_action==PANEL_WIFI_OFF?"off":"probe";
+            wifi_worker=power_worker_command(helper,action);
+            system_panel_network(wifi_state,wifi_worker>0,wifi_worker<0);
         }
         if(acquired&&!sleeping)display_flush(&screen);
         if(acquired&&sleeping&&cover_at&&monotonic_ns()>=cover_at){
@@ -462,7 +507,7 @@ int main(int argc,char **argv){
             write_number("/sys/class/backlight/mxc_msp430.0/brightness",0);
             suspend_at=monotonic_ns();
         }
-        if(acquired&&sleeping&&radio_worker<0&&suspend_at&&monotonic_ns()>=suspend_at){
+        if(acquired&&sleeping&&radio_worker<0&&wifi_worker<0&&suspend_at&&monotonic_ns()>=suspend_at){
             suspend_at=0;
             char marker[4096];snprintf(marker,sizeof(marker),"%s/state/power-screen-only",root);
             if(power_worker<0&&access(marker,F_OK)!=0){
@@ -482,9 +527,9 @@ int main(int argc,char **argv){
         if(!frame_available&&frame_sched_at<deadline)deadline=frame_sched_at;
         if(!acquired&&now+100000000ULL<deadline)deadline=now+100000000ULL;
         if(sleeping&&cover_at&&cover_at<deadline)deadline=cover_at;
-        if(sleeping&&radio_worker<0&&suspend_at&&suspend_at<deadline)deadline=suspend_at;
+        if(sleeping&&radio_worker<0&&wifi_worker<0&&suspend_at&&suspend_at<deadline)deadline=suspend_at;
         if(cover.due&&cover.due<deadline)deadline=cover.due;
-        if((power_worker>0||radio_worker>0)&&now+250000000ULL<deadline)deadline=now+250000000ULL;
+        if((power_worker>0||radio_worker>0||wifi_worker>0)&&now+250000000ULL<deadline)deadline=now+250000000ULL;
         if(escape_at&&escape_at+2000000000ULL<deadline)deadline=escape_at+2000000000ULL;
         if(acquired&&!sleeping){uint64_t update_at=display_deadline(&screen);if(update_at<deadline)deadline=update_at;}
         struct pollfd fds[]={{wake_pipe[0],POLLIN,0},{sleeping?-1:touch.fd,POLLIN,0},{power,POLLIN,0},{cover.shared_power?-1:cover.fd,POLLIN,0}};
@@ -518,9 +563,11 @@ int main(int argc,char **argv){
     state_file("power-cancel",true);
     if(power_worker>0)power_worker_stop(power_worker);
     if(radio_worker>0)power_worker_stop(radio_worker);
+    if(wifi_worker>0)power_worker_stop(wifi_worker);
     cover_close(&cover);
     if(power>=0)close(power);touch_close(&touch,engine);r=FlutterEngineShutdown(engine);engine=NULL;FlutterEngineCollectAOTData(aot);display_close(&screen);free(clipboard);
     if(r==kSuccess&&user_exit&&acquired&&!sleeping&&!terminating&&!screen.failures)record_clean_exit();
+    system_panel_destroy();
     fprintf(stderr,"[host] shutdown complete\n");
     while(tasks){Pending *p=tasks;tasks=p->next;free(p);}close(wake_pipe[0]);close(wake_pipe[1]);unlink(heartbeat_path);return 0;
 }

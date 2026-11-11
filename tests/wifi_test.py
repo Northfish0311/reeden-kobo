@@ -30,7 +30,7 @@ class WifiTest(unittest.TestCase):
         (self.app / 'session.sh').write_text(f'''APP="{self.app}"
 STATE="$APP/state"
 token() {{ echo 1; }}
-owned_host() {{ [ -f "$APP/owned" ]; }}
+owned_host() {{ HOST=456; HOST_TOKEN=789; [ -f "$APP/owned" ]; }}
 same_process() {{
   if [ "$1" = 123 ]; then [ -f "$APP/alive" ]; else command kill -0 "$1" 2>/dev/null; fi
 }}
@@ -87,14 +87,17 @@ esac
                               text=True, capture_output=True, timeout=10)
 
     def test_status_requires_up_association_and_ip(self):
+        self.assertEqual(self.call('probe').returncode, 12)
         self.assertEqual(self.call('status').stdout.strip(), 'CONNECTED')
         for marker in ['connected', 'ip']:
             (self.app / marker).unlink()
             self.assertEqual(self.call('status').stdout.strip(), 'NA')
+            self.assertEqual(self.call('probe').returncode, 11)
             (self.app / marker).touch()
         (self.app / 'sys/class/net/wlan0/flags').write_text('0x1202\n')
         self.assertEqual(self.call('status').stdout.strip(), 'NA')
         self.assertEqual(self.call('enabled').stdout.strip(), '0')
+        self.assertEqual(self.call('probe').returncode, 10)
 
     def test_lipc_signals_and_wifi_properties(self):
         for property, expected in [('cmState', 'CONNECTED'), ('signalStrength', '4/5'), ('enable', '1')]:
@@ -120,10 +123,13 @@ esac
         self.env['REEDEN_CHOICES'] = str(choices)
         self.assertEqual(self.call('on').returncode, 0)
         self.assertEqual((choices / 'wifi').read_text(), '1\n')
+        self.assertEqual((self.app / 'state/wifi-choice').read_text(), '456 789 1\n')
         self.assertEqual(self.call('suspend').returncode, 0)
         self.assertEqual((choices / 'wifi').read_text(), '1\n')
+        self.assertEqual((self.app / 'state/wifi-choice').read_text(), '456 789 1\n')
         self.assertEqual(self.call('off').returncode, 0)
         self.assertEqual((choices / 'wifi').read_text(), '0\n')
+        self.assertEqual((self.app / 'state/wifi-choice').read_text(), '456 789 0\n')
 
     def test_off_on_reconnects_using_saved_profile(self):
         self.assertEqual(self.call('off').returncode, 0)

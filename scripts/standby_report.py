@@ -123,7 +123,8 @@ def cover_report(path):
             mode = '已识别 ' + match[1]
         elif line == '[cover] no supported internal lid input; power key remains available':
             mode = '未识别到受支持的盖传感器'
-        elif line == '[cover] disabled by user preference':
+        elif line in ('[cover] disabled by user preference',
+                      '[cover] extra listener disabled; existing power handling unchanged'):
             mode = '已手动关闭保护盖监听'
         elif match := re.fullmatch(r'\[power\] phase=cover-(closed|opened) wall=(\d{1,10}) mono_ms=\d+', line):
             stamp = datetime.fromtimestamp(int(match[2]), timezone.utc).astimezone()

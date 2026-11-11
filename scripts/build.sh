@@ -28,7 +28,7 @@ fi
 # build machine's checkout directory, Zig installation path or username.
 # This is required both for privacy and for byte-identical reproduction on CI.
 "$ZIG" cc -target arm-linux-gnueabihf.2.28 -mcpu=cortex_a7 -fPIC -pie -O2 -Wall -Wextra -Werror -Wno-unused-parameter -Iinclude -Isrc -Ivendor \
-    src/host.c src/power_worker.c src/cover.c src/display.c src/refresh_policy.c src/turn_timing.c src/frame_evidence.c src/light_panel.c src/input.c src/codec.c vendor/cJSON.c \
+    src/host.c src/power_worker.c src/cover.c src/system_panel.c src/display.c src/refresh_policy.c src/turn_timing.c src/frame_evidence.c src/light_panel.c src/input.c src/codec.c vendor/cJSON.c \
     -L"$ENGINE_LIB_DIR" -lflutter_engine -lpthread -ldl -lm -Wl,-rpath,'$ORIGIN/../core/lib:$ORIGIN/../lib' \
     -Wl,--strip-all -o "$ROOT/package/bin/reeden-kindle"
 "$ZIG" cc -target arm-linux-gnueabihf.2.17 -mcpu=cortex_a7 -O2 -Wall -Wextra -Werror -shared -fPIC \

@@ -147,6 +147,22 @@ class RecoveryTest(unittest.TestCase):
                 self.assertEqual((self.app / 'warmth').read_text().strip(), '8')
                 self.assertEqual((self.app / 'native-calls').read_text().splitlines()[-2:], ['start', 'wifi-choice reconnect'])
 
+    def test_successful_toggle_survives_crash_but_not_another_session(self):
+        for choice, expected in [('999999 42 0', '0'), ('999999 42 1', '1'),
+                                 ('999999 41 0', 'reconnect'), ('999998 42 0', 'reconnect'),
+                                 ('999999 42 invalid', 'reconnect')]:
+            with self.subTest(choice=choice):
+                (self.state / 'active').mkdir(exist_ok=True)
+                (self.state / 'owner').write_text('123 456\n')
+                (self.state / 'host').write_text('999999 42\n')
+                for marker in ('handoff', 'native-restart', 'native-was-connected', 'asleep'):
+                    (self.state / marker).touch()
+                (self.state / 'wifi-choice').write_text(choice + '\n')
+                self.script('native-session.sh', '#!/bin/sh\necho "$*" >> native-calls\n')
+                self.assertEqual(self.recover(), 0)
+                self.assertEqual((self.app / 'native-calls').read_text().splitlines()[-2:], ['start', 'wifi-choice ' + expected])
+                self.assertFalse((self.state / 'wifi-choice').exists())
+
 
 if __name__ == '__main__':
     unittest.main()

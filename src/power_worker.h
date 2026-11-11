@@ -6,6 +6,7 @@
 /* A non-SIGCHLD child is invisible to Dart's process-wide wait(). */
 pid_t power_worker_start(const char *path);
 pid_t power_worker_restore_wifi(const char *path);
+pid_t power_worker_command(const char *path, const char *action);
 pid_t power_worker_poll(pid_t pid,int *status);
 int power_worker_stop(pid_t pid);
 

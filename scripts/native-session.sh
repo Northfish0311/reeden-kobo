@@ -9,15 +9,29 @@ wifi-choice)
     unset LD_LIBRARY_PATH LD_PRELOAD LD_AUDIT
     service=com.github.shermp.nickeldbus
     command -v dbus-send >/dev/null || exit 69
-    timeout 2 dbus-send --system --print-reply --reply-timeout=1500 --dest=org.freedesktop.DBus /org/freedesktop/DBus org.freedesktop.DBus.NameHasOwner string:"$service" 2>/dev/null | grep -q 'boolean true' || exit 69
+    attempt=0
+    while ! timeout 2 dbus-send --system --print-reply --reply-timeout=1500 --dest=org.freedesktop.DBus /org/freedesktop/DBus org.freedesktop.DBus.NameHasOwner string:"$service" 2>/dev/null | grep -q 'boolean true'; do
+        [ "$attempt" -lt 4 ] || exit 69
+        usleep 200000; attempt=$((attempt+1))
+    done
     native_call() { timeout 2 dbus-send --system --print-reply --reply-timeout=1500 --dest="$service" /nickeldbus "$@" >/dev/null; }
+    native_up() {
+        [ -r /sys/class/net/wlan0/flags ] || return 1
+        read -r flags < /sys/class/net/wlan0/flags
+        case "$flags" in 0x[0-9a-fA-F]*) [ $((flags & 1)) -ne 0 ];; *) return 1;; esac
+    }
     case "${2:-}" in
-        0) native_call "$service.wfmSetAirplaneMode" string:disable;;
-        1) native_call "$service.wfmSetAirplaneMode" string:enable && native_call "$service.wfmConnectWirelessSilently";;
-        reconnect) native_call "$service.wfmConnectWirelessSilently";;
+        0) native_call "$service.wfmSetAirplaneMode" string:disable || exit 1;;
+        1) native_call "$service.wfmSetAirplaneMode" string:enable && native_call "$service.wfmConnectWirelessSilently" || exit 1;;
+        reconnect) native_call "$service.wfmConnectWirelessSilently" || exit 1;;
         *) exit 64;;
     esac
-    exit $?;;
+    attempt=0
+    while :; do
+        if [ "${2:-}" = 0 ]; then native_up || exit 0; else native_up && exit 0; fi
+        [ "$attempt" -lt 20 ] || exit 1
+        usleep 200000; attempt=$((attempt+1))
+    done;;
 capture)
     pid=$(pidof nickel) || exit 1
     case "$pid" in *' '*) exit 1;; esac
