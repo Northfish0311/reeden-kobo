@@ -27,7 +27,8 @@ class StandbyGuardTest(unittest.TestCase):
         self.target.write_text('untouched\n')
         (app / 'proc/uptime').write_text('123.4 0\n')
         (app / 'session.sh').write_text(f'APP="{app}"\nSTATE="$APP/state"\n')
-        src = re.sub(r'/(sys|proc|dev|etc)/', lambda m: str(app) + m[0], (ROOT / 'scripts/power.sh').read_text())
+        # Remap hardware reads, but keep the real null sink for stderr redirects.
+        src = re.sub(r'/(sys|proc)/', lambda m: str(app) + m[0], (ROOT / 'scripts/power.sh').read_text())
         src = src.replace('export PATH=/usr/local/Kobo:/usr/sbin:/usr/bin:/sbin:/bin',
                           f'export PATH="{app}/stubs:/usr/bin:/bin"')
         (app / 'power.sh').write_text(src)
@@ -64,13 +65,13 @@ class StandbyGuardTest(unittest.TestCase):
     def test_missing_debug_view_does_not_bypass_a_busy_timer(self):
         (self.app / 'proc/timer_list').write_text('_hrtint_xon_\n')
         code, log = self.attempt()
-        self.assertEqual(code, 75)
+        self.assertEqual(code, 75, log)
         self.assertIn('display did not become idle', log)
         self.assertEqual(self.target.read_text(), 'untouched\n')
 
     def test_short_return_distinct_from_power_key_or_normal_resume(self):
         code, log = self.attempt()
-        self.assertEqual(code, 76)
+        self.assertEqual(code, 76, log)
         self.assertEqual(self.target.read_text().strip(), 'mem')
         self.assertIn('short mem return after 0s; wake source unknown', log)
         self.assertIn('sample=after_mem battery=Discharging external=off capacity=81', log)

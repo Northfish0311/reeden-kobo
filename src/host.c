@@ -416,6 +416,7 @@ int main(int argc,char **argv){
                 wifi_worker=-1;
                 bool ok=wifi_action==PANEL_PROBE?(code>=10&&code<=12):code==0;
                 if(wifi_action==PANEL_PROBE)wifi_state=ok?(enum panel_wifi)(code-9):PANEL_UNKNOWN;
+                else if(!ok)wifi_state=PANEL_UNKNOWN;
                 system_panel_network(wifi_state,false,!ok);
                 if(ok&&wifi_action!=PANEL_PROBE&&!sleeping&&panel_request==PANEL_NONE&&system_panel_visible())panel_request=PANEL_PROBE;
                 fprintf(stderr,"[wifi] panel helper finished action=%d result=%d\n",wifi_action,code);
