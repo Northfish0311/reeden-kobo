@@ -2,6 +2,7 @@
 #undef NDEBUG
 #include <assert.h>
 #include <fcntl.h>
+#include <linux/ioctl.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
