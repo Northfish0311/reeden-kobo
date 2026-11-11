@@ -2,6 +2,22 @@
 # Only the native processes recorded by this session may be stopped.
 . "$(dirname -- "$0")/session.sh"
 case "${1:-}" in
+wifi-choice)
+    # Ask Nickel itself; never restart a supplicant under the live native UI.
+    pidof nickel >/dev/null 2>&1 || exit 69
+    export PATH=/usr/local/Kobo:/usr/sbin:/usr/bin:/sbin:/bin
+    unset LD_LIBRARY_PATH LD_PRELOAD LD_AUDIT
+    service=com.github.shermp.nickeldbus
+    command -v dbus-send >/dev/null || exit 69
+    timeout 2 dbus-send --system --print-reply --reply-timeout=1500 --dest=org.freedesktop.DBus /org/freedesktop/DBus org.freedesktop.DBus.NameHasOwner string:"$service" 2>/dev/null | grep -q 'boolean true' || exit 69
+    native_call() { timeout 2 dbus-send --system --print-reply --reply-timeout=1500 --dest="$service" /nickeldbus "$@" >/dev/null; }
+    case "${2:-}" in
+        0) native_call "$service.wfmSetAirplaneMode" string:disable;;
+        1) native_call "$service.wfmSetAirplaneMode" string:enable && native_call "$service.wfmConnectWirelessSilently";;
+        reconnect) native_call "$service.wfmConnectWirelessSilently";;
+        *) exit 64;;
+    esac
+    exit $?;;
 capture)
     pid=$(pidof nickel) || exit 1
     case "$pid" in *' '*) exit 1;; esac

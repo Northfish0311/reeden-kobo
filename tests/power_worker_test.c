@@ -20,6 +20,19 @@ static void *foreign_reaper(void *unused){
     return NULL;
 }
 int main(void){
+    assert(power_cover_due(0,500)==0);
+    assert(power_cover_due(900000000ULL,100)==100000100ULL);
+    assert(power_cover_due(100000100ULL,900000000ULL)==100000100ULL);
+    assert(power_lock_result(0,false,false,false)==LOCK_RESUME);
+    assert(power_lock_result(0,false,false,true)==LOCK_RETRY);
+    assert(power_lock_result(0,false,true,true)==LOCK_KEEP);
+    assert(power_lock_result(0,true,true,true)==LOCK_RESUME);
+    for(int code=1;code<=127;code++){
+        assert(power_lock_result(code<<8,true,true,false)==LOCK_RESUME);
+        assert(power_lock_result(code<<8,false,false,false)==((code==3||code==75||code==76)?LOCK_RETRY:LOCK_KEEP));
+        assert(power_lock_result(code<<8,false,true,false)==LOCK_KEEP);
+    }
+    assert(power_lock_result(SIGTERM,false,false,false)==LOCK_KEEP);
     /* SSH shells may inherit an ignored SIGCHLD. Establish the VM's usual
      * child-reaping environment explicitly for the regression test. */
     assert(signal(SIGCHLD,SIG_DFL)!=SIG_ERR);

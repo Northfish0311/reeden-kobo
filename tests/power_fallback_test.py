@@ -29,7 +29,9 @@ with tempfile.TemporaryDirectory(prefix='reeden-power-fallback-') as tmp:
     result = subprocess.run(['sh', str(script), 'suspend'], check=False)
     log = (app / 'logs/power.log').read_text()
 
-    assert result.returncode == 0, (result.returncode, log)
+    # The synthetic clock never advances: one request happened, but the host
+    # must not mistake this immediate return for a user asking to resume.
+    assert result.returncode == 76, (result.returncode, log)
     assert (app / 'sys/power/state').read_text().strip() == 'mem', log
     assert 'wakeup_sources unreadable' in log, log
     assert 'display did not become idle' not in log, log

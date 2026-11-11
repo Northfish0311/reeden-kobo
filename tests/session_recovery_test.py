@@ -30,7 +30,10 @@ class RecoveryTest(unittest.TestCase):
         for name in ('state/active', 'logs', 'bin'):
             (self.app / name).mkdir(parents=True)
         shutil.copy2(self.helper, self.app / 'bin/fb-guard')
-        self.script('recover.sh', (ROOT / 'scripts/recover.sh').read_text())
+        recovery = (ROOT / 'scripts/recover.sh').read_text()
+        recovery = recovery.replace('/sys/class/backlight/mxc_msp430.0/brightness', str(self.app / 'brightness'))
+        recovery = recovery.replace('/sys/class/backlight/lm3630a_led/color', str(self.app / 'warmth'))
+        self.script('recover.sh', recovery)
         self.script('session.sh', (ROOT / 'scripts/session.sh').read_text() +
                     '\npidof() { [ -e "$APP/test-nickel-running" ]; }\n')
         self.script('power.sh', '#!/bin/sh\necho "$1" >> power-calls\n[ ! -f fail-radio ]\n')
@@ -113,6 +116,36 @@ class RecoveryTest(unittest.TestCase):
         (self.app / 'fail-ui').unlink()
         self.assertEqual(self.recover(), 0)
         self.assertFalse((self.state / 'active').exists())
+
+    def test_confirmed_clean_exit_applies_last_choices_before_native_start(self):
+        (self.state / 'host').write_text('999999 42\n')
+        (self.state / 'handoff').touch()
+        (self.state / 'native-restart').touch()
+        (self.state / 'light').write_text('42 8\n')
+        (self.state / 'clean-exit').write_text('999999 0 2 1\n')
+        self.script('native-session.sh', '#!/bin/sh\necho "$* $(cat brightness) $(cat warmth)" >> native-calls\n')
+        self.assertEqual(self.recover(), 0)
+        self.assertEqual((self.app / 'native-calls').read_text().splitlines(), ['start 0 2', 'wifi-choice 1 0 2'])
+
+    def test_asleep_missing_or_stale_marker_restores_original_settings(self):
+        for marker, asleep in [(None, False), ('999998 0 0 0', False), ('999999 0 0 0', True)]:
+            with self.subTest(marker=marker, asleep=asleep):
+                (self.state / 'active').mkdir(exist_ok=True)
+                (self.state / 'owner').write_text('123 456\n')
+                (self.state / 'host').write_text('999999 42\n')
+                (self.state / 'handoff').touch()
+                (self.state / 'native-restart').touch()
+                (self.state / 'native-was-connected').touch()
+                (self.state / 'light').write_text('42 8\n')
+                if marker:
+                    (self.state / 'clean-exit').write_text(marker + '\n')
+                if asleep:
+                    (self.state / 'asleep').touch()
+                self.script('native-session.sh', '#!/bin/sh\necho "$*" >> native-calls\n')
+                self.assertEqual(self.recover(), 0)
+                self.assertEqual((self.app / 'brightness').read_text().strip(), '42')
+                self.assertEqual((self.app / 'warmth').read_text().strip(), '8')
+                self.assertEqual((self.app / 'native-calls').read_text().splitlines()[-2:], ['start', 'wifi-choice reconnect'])
 
 
 if __name__ == '__main__':

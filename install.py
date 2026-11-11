@@ -46,7 +46,7 @@ SUPPORTED_CORES = {
     },
 }
 OFFICIAL_LATEST_URL = 'https://download.reeden.app/Reeden/latest/Reeden-kindle.zip'
-PORT_VERSION = '0.7.8-community.1'
+PORT_VERSION = '0.7.8-community.2'
 SUPPORTED_PRODUCT = '393'
 
 

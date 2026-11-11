@@ -114,6 +114,17 @@ esac
         self.assertNotIn(' terminate', commands)
         self.assertNotIn('dhcpcd', commands)
 
+    def test_only_reader_toggles_record_native_intent(self):
+        choices = self.app / 'choices'
+        choices.mkdir()
+        self.env['REEDEN_CHOICES'] = str(choices)
+        self.assertEqual(self.call('on').returncode, 0)
+        self.assertEqual((choices / 'wifi').read_text(), '1\n')
+        self.assertEqual(self.call('suspend').returncode, 0)
+        self.assertEqual((choices / 'wifi').read_text(), '1\n')
+        self.assertEqual(self.call('off').returncode, 0)
+        self.assertEqual((choices / 'wifi').read_text(), '0\n')
+
     def test_off_on_reconnects_using_saved_profile(self):
         self.assertEqual(self.call('off').returncode, 0)
         self.assertEqual(self.call('on').returncode, 0)

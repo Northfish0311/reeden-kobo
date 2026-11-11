@@ -28,7 +28,7 @@ fi
 # build machine's checkout directory, Zig installation path or username.
 # This is required both for privacy and for byte-identical reproduction on CI.
 "$ZIG" cc -target arm-linux-gnueabihf.2.28 -mcpu=cortex_a7 -fPIC -pie -O2 -Wall -Wextra -Werror -Wno-unused-parameter -Iinclude -Isrc -Ivendor \
-    src/host.c src/power_worker.c src/display.c src/refresh_policy.c src/turn_timing.c src/frame_evidence.c src/light_panel.c src/input.c src/codec.c vendor/cJSON.c \
+    src/host.c src/power_worker.c src/cover.c src/display.c src/refresh_policy.c src/turn_timing.c src/frame_evidence.c src/light_panel.c src/input.c src/codec.c vendor/cJSON.c \
     -L"$ENGINE_LIB_DIR" -lflutter_engine -lpthread -ldl -lm -Wl,-rpath,'$ORIGIN/../core/lib:$ORIGIN/../lib' \
     -Wl,--strip-all -o "$ROOT/package/bin/reeden-kindle"
 "$ZIG" cc -target arm-linux-gnueabihf.2.17 -mcpu=cortex_a7 -O2 -Wall -Wextra -Werror -shared -fPIC \
@@ -50,7 +50,7 @@ echo "Built Kobo host, path/child-runtime compatibility library and framebuffer 
 # (Runtime paths such as /tmp/reeden-kobo-*.heartbeat are intentional and
 # do not match; only build-machine paths like the Zig installation directory,
 # the checkout directory under /Users or /home, or macOS /private prefixes.)
-for artifact in \
+"${PYTHON:-python3}" "$ROOT/scripts/check_build_paths.py" \
     "$ROOT/package/bin/reeden-kindle" \
     "$ROOT/package/bin/fb-guard" \
     "$ROOT/package/lib/libreeden_kobo_compat.so" \
@@ -60,11 +60,5 @@ for artifact in \
     "$ROOT/build/runtime-test-armhf" \
     "$ROOT/build/refresh-policy-test-armhf" \
     "$ROOT/build/power-worker-test-armhf" \
-    "$ROOT/build/display-transaction-test-armhf"; do
-    if strings "$artifact" | grep -q -E '^/Users/|^/home/|^/private/|zig-macos-aarch64|zig-linux-x86_64|lib/libc/musl|/lib/std/'; then
-        echo "ERROR: $artifact embeds an absolute build path" >&2
-        strings "$artifact" | grep -E '^/Users/|^/home/|^/private/|zig-macos-aarch64|zig-linux-x86_64|lib/libc/musl|/lib/std/' | head -5 >&2
-        exit 1
-    fi
-done
+    "$ROOT/build/display-transaction-test-armhf"
 echo "Path-leak guard: no absolute build paths embedded in any shipped artifact"

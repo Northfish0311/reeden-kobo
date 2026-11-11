@@ -128,7 +128,11 @@ wifi_on() {
     echo '[wifi] association/DHCP started; connection is not yet assumed'
 }
 case "$mode" in
-off) wifi_off && rm -f "$STATE/wifi-restore";;
+off) wifi_off || exit 1
+     rm -f "$STATE/wifi-restore"
+     [ -z "${REEDEN_CHOICES:-}" ] || echo 0 > "$REEDEN_CHOICES/wifi";;
 suspend|native) wifi_off;;
-on|resume) wifi_on;;
+on) wifi_on || exit 1
+    [ -z "${REEDEN_CHOICES:-}" ] || echo 1 > "$REEDEN_CHOICES/wifi";;
+resume) wifi_on;;
 esac

@@ -4,6 +4,7 @@
 #include "cJSON.h"
 #include "light_panel.h"
 #include "power_worker.h"
+#include "cover.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -36,11 +37,16 @@ static unsigned long tasks_posted,tasks_run;
 static char *clipboard;
 static const char *root;
 static bool sleeping;
+static bool user_exit;
+static volatile sig_atomic_t terminating;
 static uint64_t cover_at;
+static bool wake_requested,retried_suspend;
+static uint64_t suspend_at;
 static char cover_path[4096];
 static unsigned cover_width,cover_height,cover_channels=1;
 static int saved_brightness=-1;
 static pid_t power_worker=-1;
+static pid_t radio_worker=-1;
 static char heartbeat_path[4096];
 static void respond(const FlutterPlatformMessage *,const void *,size_t);
 static void empty_reply(const FlutterPlatformMessage *);
@@ -62,6 +68,29 @@ static void state_file(const char *name,bool create){
     char path[4096];snprintf(path,sizeof(path),"%s/state/%s",root,name);
     if(create){FILE *f=fopen(path,"w");if(f)fclose(f);}else unlink(path);
 }
+static void remember_choice(const char *name,int value){
+    char path[4096];const char *dir=getenv("REEDEN_CHOICES");
+    if(!sleeping&&dir&&*dir&&snprintf(path,sizeof(path),"%s/%s",dir,name)<(int)sizeof(path))
+        (void)write_number(path,value);
+}
+#ifndef REEDEN_HEADLESS_DIAGNOSTIC
+static void remember_warmth(int raw){remember_choice("warmth",raw);}
+#endif
+static int last_choice(const char *dir,const char *name,int max){
+    char path[4096];
+    if(snprintf(path,sizeof(path),"%s/%s",dir,name)>=(int)sizeof(path))return -1;
+    int n=read_number(path,-1);return n>=0&&n<=max?n:-1;
+}
+static void record_clean_exit(void){
+    const char *dir=getenv("REEDEN_CHOICES");char path[4096];
+    if(!dir||!*dir||snprintf(path,sizeof(path),"%s/state/clean-exit",root)>=(int)sizeof(path))return;
+    int fd=open(path,O_WRONLY|O_CREAT|O_EXCL|O_CLOEXEC|O_NOFOLLOW,0600);
+    if(fd>=0){
+        int n=dprintf(fd,"%ld %d %d %d\n",(long)getpid(),last_choice(dir,"brightness",100),
+                      last_choice(dir,"warmth",10),last_choice(dir,"wifi",1));
+        int err=close(fd);if(n<0||err<0)unlink(path);
+    }
+}
 static void power_trace(const char *phase){
     struct timespec wall;clock_gettime(CLOCK_REALTIME,&wall);
     fprintf(stderr,"[power] phase=%s wall=%lld mono_ms=%llu\n",phase,
@@ -80,7 +109,7 @@ static void sleep_cover_channel(const FlutterPlatformMessage *m,const char *meth
         Value path={0},width={0},height={0},ch={0};
         bool valid=read_argument(args,"path",&path)&&path.type==7&&read_argument(args,"width",&width)&&read_argument(args,"height",&height)&&width.integer>0&&height.integer>0&&width.integer<=4096&&height.integer<=4096;
         unsigned channels=(read_argument(args,"channels",&ch)&&ch.integer>=1&&ch.integer<=4)?(unsigned)ch.integer:1;
-        if(valid){snprintf(cover_path,sizeof(cover_path),"%s",path.string);cover_width=width.integer;cover_height=height.integer;cover_channels=channels;if(sleeping)cover_at=monotonic_ns()+100000000ULL;fprintf(stderr,"[sleep-cover] registered %ux%u channels=%u\n",cover_width,cover_height,cover_channels);}
+        if(valid){snprintf(cover_path,sizeof(cover_path),"%s",path.string);cover_width=width.integer;cover_height=height.integer;cover_channels=channels;if(sleeping)cover_at=power_cover_due(cover_at,monotonic_ns());fprintf(stderr,"[sleep-cover] registered %ux%u channels=%u\n",cover_width,cover_height,cover_channels);}
         w_bool(&w,valid);
     }else {empty_reply(m);return;}
     respond(m,w.data,w.n);
@@ -88,6 +117,7 @@ static void sleep_cover_channel(const FlutterPlatformMessage *m,const char *meth
 static void set_sleep(Touch *touch,bool asleep){
     if(sleeping==asleep)return;
     sleeping=asleep;
+    wake_requested=false;retried_suspend=false;suspend_at=0;
     if(asleep){
         state_file("power-phase",false);power_trace("locking");
         state_file("power-cancel",false);state_file("asleep",true);
@@ -98,6 +128,13 @@ static void set_sleep(Touch *touch,bool asleep){
     }else{
         power_trace("restoring-reader");
         state_file("power-cancel",true);
+        state_file("cover-closed",false);
+        char marker[4096];snprintf(marker,sizeof(marker),"%s/state/wifi-restore",root);
+        if(radio_worker<0&&power_worker<0&&access(marker,F_OK)==0){
+            char helper[4096];snprintf(helper,sizeof(helper),"%s/power.sh",root);
+            radio_worker=power_worker_restore_wifi(helper);
+            if(radio_worker<0)perror("Wi-Fi restore worker");
+        }
         if(saved_brightness>=0)write_number("/sys/class/backlight/mxc_msp430.0/brightness",saved_brightness);
         lifecycle("AppLifecycleState.resumed");FlutterEngineScheduleFrame(engine);display_full(&screen);
         if(touch_open(touch)){perror("touch resume");app_quit=1;}
@@ -109,7 +146,7 @@ static void set_sleep(Touch *touch,bool asleep){
 static char logged_channels[64][160];
 static unsigned channel_count;
 static void wake(void){if(wake_pipe[1]>=0){char c=1;ssize_t r=write(wake_pipe[1],&c,1);(void)r;}}
-static void quit_signal(int n){(void)n;app_quit=1;wake();}
+static void quit_signal(int n){(void)n;terminating=1;app_quit=1;wake();}
 /* Only the platform thread may execute tasks for this runner. */
 static bool on_platform_thread(void *u){(void)u;return pthread_equal(platform_thread,pthread_self());}
 static void post_task(FlutterTask task,uint64_t target,void *u){
@@ -162,7 +199,7 @@ static void json_platform(const FlutterPlatformMessage *m){
     if(!j){json_reply(m,NULL);return;}
     const cJSON *method=cJSON_GetObjectItemCaseSensitive(j,"method"),*args=cJSON_GetObjectItemCaseSensitive(j,"args");
     const char *name=cJSON_IsString(method)?method->valuestring:"";
-    if(!strcmp(name,"SystemNavigator.pop")){app_quit=1;json_reply(m,NULL);}
+    if(!strcmp(name,"SystemNavigator.pop")){user_exit=true;app_quit=1;json_reply(m,NULL);}
     else if(!strcmp(name,"Clipboard.setData")){const cJSON *s=cJSON_GetObjectItemCaseSensitive(args,"text");free(clipboard);clipboard=cJSON_IsString(s)?strdup(s->valuestring):NULL;json_reply(m,NULL);}
     else if(!strcmp(name,"Clipboard.getData")){cJSON *v=NULL;if(clipboard){v=cJSON_CreateObject();cJSON_AddStringToObject(v,"text",clipboard);}json_reply(m,v);}
     else if(!strcmp(name,"Clipboard.hasStrings")){cJSON *v=cJSON_CreateObject();cJSON_AddBoolToObject(v,"value",clipboard&&*clipboard);json_reply(m,v);}
@@ -204,10 +241,10 @@ static void kobo_channel(const FlutterPlatformMessage *m,const char *method,Read
     else if(!strcmp(method,"getBrightness"))w_int(&w,read_number("/sys/class/backlight/mxc_msp430.0/brightness",-1));
     else if(!strcmp(method,"getWarmth")){int n=read_number("/sys/class/backlight/lm3630a_led/color",-1);w_int(&w,n<0?-1:(10-n)*10);}
     else if(!strcmp(method,"setBrightness")||!strcmp(method,"setWarmth")){
-        if(!screen.mem)standard_error(&w,"not-active","Hardware handoff has not completed");
+        if(!screen.mem||sleeping)standard_error(&w,"not-active","Reader does not own the active light");
         else if(!read_argument(args,NULL,&v)||v.type!=3||v.integer<0||v.integer>100)standard_error(&w,"invalid-argument","Expected integer 0..100");
-        else {bool warm=!strcmp(method,"setWarmth");int n=warm?10-(int)(v.integer+5)/10:(int)v.integer;int r=write_number(warm?"/sys/class/backlight/lm3630a_led/color":"/sys/class/backlight/mxc_msp430.0/brightness",n);if(r)standard_error(&w,"io-error",strerror(errno));else w_null(&w);}
-    }else if(!strcmp(method,"exit")){app_quit=1;w_null(&w);}
+        else {bool warm=!strcmp(method,"setWarmth");int n=warm?10-(int)(v.integer+5)/10:(int)v.integer;int r=write_number(warm?"/sys/class/backlight/lm3630a_led/color":"/sys/class/backlight/mxc_msp430.0/brightness",n);if(r)standard_error(&w,"io-error",strerror(errno));else{remember_choice(warm?"warmth":"brightness",n);w_null(&w);}}
+    }else if(!strcmp(method,"exit")){user_exit=true;app_quit=1;w_null(&w);}
     else {empty_reply(m);return;}
     respond(m,w.data,w.error?0:w.n);
 }
@@ -298,7 +335,7 @@ int main(int argc,char **argv){
     if(display_open(&screen)){perror("display_open");display_close(&screen);return 2;}
     if(screen.turn_options.trace)touch_set_observer(observe_input);
     memset(&touch,0,sizeof(touch));touch.fd=-1;
-    light_panel_init(root,(LightPanelOps){.read_number=read_number,.write_number=write_number,.invalidate=light_panel_changed,.userdata=&screen});
+    light_panel_init(root,(LightPanelOps){.read_number=read_number,.write_number=write_number,.invalidate=light_panel_changed,.userdata=&screen,.user_warmth=remember_warmth});
     touch_set_filter(light_panel_pointer);
 #endif
     char assets[4096],icu[4096],aot_path[4096],cache[4096],ver_path[4096];
@@ -341,6 +378,7 @@ int main(int argc,char **argv){
      fprintf(stderr,"[lifecycle] send result=%d\n",FlutterEngineSendPlatformMessage(engine,&lm));}
     FlutterEngineScheduleFrame(engine);
     int power=-1;bool acquired=false,ready=false,power_down=false;
+    Cover cover={.fd=-1,.observed=-1,.reported=-1};
     char ready_path[4096],handoff[4096];snprintf(ready_path,sizeof(ready_path),"%s/state/ready",root);snprintf(handoff,sizeof(handoff),"%s/state/handoff",root);
     uint64_t escape_at=0;
     uint64_t heartbeat_at=0;
@@ -348,13 +386,29 @@ int main(int argc,char **argv){
     while(!app_quit){
         if(monotonic_ns()>heartbeat_at){heartbeat_touch();heartbeat_at=monotonic_ns()+5000000000ULL;}
 #ifndef REEDEN_HEADLESS_DIAGNOSTIC
+        if(radio_worker>0){
+            int status;pid_t result=power_worker_poll(radio_worker,&status);
+            if(result==radio_worker||(result<0&&errno!=EINTR)){
+                fprintf(stderr,"[power] Wi-Fi restore helper finished status=%d\n",result>0?status:-1);radio_worker=-1;
+            }
+        }
         if(power_worker>0){int status=0;pid_t result=power_worker_poll(power_worker,&status);
             if(result==power_worker){power_worker=-1;fprintf(stderr,"[power] helper status=%d\n",status);
                 power_trace("helper-finished");
-                if(sleeping&&!(WIFEXITED(status)&&WEXITSTATUS(status)==3)){
-                    struct input_event stale[16];while(read(power,stale,sizeof(stale))>0){}power_down=false;
+                enum lock_result action=power_lock_result(status,wake_requested,retried_suspend,cover.reported==1);
+                if(sleeping&&action==LOCK_RESUME){
+                    struct input_event stale[16];ssize_t bytes;
+                    while((bytes=read(power,stale,sizeof(stale)))>0)if(cover.shared_power)
+                        for(size_t i=0;i<(size_t)bytes/sizeof(*stale);i++)cover_event(&cover,&stale[i],monotonic_ns());
+                    power_down=false;
                     set_sleep(&touch,false);
-                }else state_file("power-phase",false);
+                }else{
+                    state_file("power-phase",false);
+                    if(sleeping&&action==LOCK_RETRY){
+                        retried_suspend=true;suspend_at=monotonic_ns()+8000000000ULL;
+                        fprintf(stderr,"[power] still locked; one guarded retry in 8s\n");
+                    }else if(sleeping)fprintf(stderr,"[power] screen stays locked; no more retries for this lock\n");
+                }
             }else if(result<0&&errno!=EINTR){
                 fprintf(stderr,"[power] helper wait failed: %s; returning to native UI\n",strerror(errno));
                 power_worker=-1;state_file("asleep",false);app_quit=1;
@@ -375,7 +429,22 @@ int main(int argc,char **argv){
             power=open("/dev/input/event2",O_RDONLY|O_NONBLOCK|O_CLOEXEC);
             if(power<0||ioctl(power,EVIOCGRAB,1)<0){perror("exclusive power key");app_quit=1;break;}
             fprintf(stderr,"[power] exclusive power key acquired\n");
+            char no_cover[4096];snprintf(no_cover,sizeof(no_cover),"%s/userdata/no-sleep-cover",root);
+            if(access(no_cover,F_OK)!=0)cover_open(&cover,power,touch.fd);
+            else fprintf(stderr,"[cover] disabled by user preference\n");
             light_panel_acquired();
+        }
+        enum cover_edge edge=cover_settled(&cover,monotonic_ns());
+        if(edge==COVER_CLOSED){
+            fprintf(stderr,"[cover] closed\n");power_trace("cover-closed");
+            state_file("cover-closed",true);
+            wake_requested=false;
+            if(!sleeping)set_sleep(&touch,true);
+        }else if(edge==COVER_OPEN){
+            fprintf(stderr,"[cover] opened\n");power_trace("cover-opened");
+            state_file("cover-closed",false);
+            if(sleeping&&power_worker>0){wake_requested=true;state_file("power-cancel",true);}
+            else if(sleeping)set_sleep(&touch,false);
         }
         if(acquired&&!sleeping)display_flush(&screen);
         if(acquired&&sleeping&&cover_at&&monotonic_ns()>=cover_at){
@@ -391,8 +460,13 @@ int main(int argc,char **argv){
             else fprintf(stderr,"[sleep-cover] not registered; keeping current page\n");
             if(display_wait(&screen)<0){perror("sleep display completion");app_quit=1;continue;}
             write_number("/sys/class/backlight/mxc_msp430.0/brightness",0);
+            suspend_at=monotonic_ns();
+        }
+        if(acquired&&sleeping&&radio_worker<0&&suspend_at&&monotonic_ns()>=suspend_at){
+            suspend_at=0;
             char marker[4096];snprintf(marker,sizeof(marker),"%s/state/power-screen-only",root);
             if(power_worker<0&&access(marker,F_OK)!=0){
+                state_file("power-cancel",false);
                 char helper[4096];snprintf(helper,sizeof(helper),"%s/power.sh",root);
                 power_trace("starting-helper");power_worker=power_worker_start(helper);
                 if(power_worker<0){perror("power helper");state_file("asleep",false);app_quit=1;}
@@ -402,17 +476,19 @@ int main(int argc,char **argv){
 #endif
         bool left=false,right=false;
         for(unsigned i=0;i<16;i++)if(touch.contacts[i].down&&touch.contacts[i].last_y<160){if(touch.contacts[i].last_x<160)left=true;if(touch.contacts[i].last_x>screen.v.xres-160)right=true;}
-        if(acquired&&left&&right){if(!escape_at)escape_at=monotonic_ns();else if(monotonic_ns()-escape_at>=2000000000ULL){fprintf(stderr,"[touch] both upper corners held: exit\n");app_quit=1;}}else escape_at=0;
+        if(acquired&&left&&right){if(!escape_at)escape_at=monotonic_ns();else if(monotonic_ns()-escape_at>=2000000000ULL){fprintf(stderr,"[touch] both upper corners held: exit\n");user_exit=true;app_quit=1;}}else escape_at=0;
         uint64_t deadline=heartbeat_at;
         uint64_t now=monotonic_ns();
         if(!frame_available&&frame_sched_at<deadline)deadline=frame_sched_at;
         if(!acquired&&now+100000000ULL<deadline)deadline=now+100000000ULL;
         if(sleeping&&cover_at&&cover_at<deadline)deadline=cover_at;
-        if(power_worker>0&&now+250000000ULL<deadline)deadline=now+250000000ULL;
+        if(sleeping&&radio_worker<0&&suspend_at&&suspend_at<deadline)deadline=suspend_at;
+        if(cover.due&&cover.due<deadline)deadline=cover.due;
+        if((power_worker>0||radio_worker>0)&&now+250000000ULL<deadline)deadline=now+250000000ULL;
         if(escape_at&&escape_at+2000000000ULL<deadline)deadline=escape_at+2000000000ULL;
         if(acquired&&!sleeping){uint64_t update_at=display_deadline(&screen);if(update_at<deadline)deadline=update_at;}
-        struct pollfd fds[]={{wake_pipe[0],POLLIN,0},{sleeping?-1:touch.fd,POLLIN,0},{power,POLLIN,0}};
-        int n=poll(fds,3,wait_ms(deadline));if(n<0&&errno!=EINTR){perror("poll");break;}
+        struct pollfd fds[]={{wake_pipe[0],POLLIN,0},{sleeping?-1:touch.fd,POLLIN,0},{power,POLLIN,0},{cover.shared_power?-1:cover.fd,POLLIN,0}};
+        int n=poll(fds,4,wait_ms(deadline));if(n<0&&errno!=EINTR){perror("poll");break;}
         if(n<0)continue;
         bool input_error=false;
         for(unsigned i=0;i<3;i++)if(fds[i].revents&(POLLNVAL|POLLERR|POLLHUP)){
@@ -422,10 +498,18 @@ int main(int argc,char **argv){
         if(input_error)break;
         if(fds[0].revents&POLLIN){char buffer[128];while(read(wake_pipe[0],buffer,sizeof(buffer))>0){}}
         if(fds[1].revents&POLLIN)touch_process(&touch,engine,screen.v.xres,screen.v.yres);
-        if(fds[2].revents&POLLIN){struct input_event ev[8];ssize_t k=read(power,ev,sizeof(ev));for(size_t i=0;k>0&&i<(size_t)k/sizeof(*ev);i++)if(ev[i].type==EV_KEY&&ev[i].code==KEY_POWER){
+        if(fds[3].revents&(POLLERR|POLLHUP|POLLNVAL)){fprintf(stderr,"[cover] sensor disconnected\n");cover_close(&cover);}
+        else if(fds[3].revents&POLLIN){
+            struct input_event ev[16];ssize_t k=read(cover.fd,ev,sizeof(ev));
+            if(!k||(k<0&&errno!=EINTR&&errno!=EAGAIN))cover_close(&cover);
+            else for(size_t i=0;k>0&&i<(size_t)k/sizeof(*ev);i++)cover_event(&cover,&ev[i],monotonic_ns());
+        }
+        if(fds[2].revents&POLLIN){struct input_event ev[8];ssize_t k=read(power,ev,sizeof(ev));for(size_t i=0;k>0&&i<(size_t)k/sizeof(*ev);i++){
+            if(cover.shared_power)cover_event(&cover,&ev[i],monotonic_ns());
+            if(ev[i].type!=EV_KEY||ev[i].code!=KEY_POWER)continue;
             if(ev[i].value==1)power_down=true;
             if(ev[i].value==0&&power_down){power_down=false;fprintf(stderr,"[power] key release\n");
-                if(sleeping&&power_worker>0){state_file("power-cancel",true);fprintf(stderr,"[power] wake requested; waiting for hardware restoration\n");}
+                if(sleeping&&power_worker>0){wake_requested=true;state_file("power-cancel",true);fprintf(stderr,"[power] wake requested; waiting for hardware restoration\n");}
                 else set_sleep(&touch,!sleeping);
             }
         }}
@@ -433,7 +517,10 @@ int main(int argc,char **argv){
     fprintf(stderr,"[host] exiting frames=%u updates=%u clean=%u gray=%u color=%u night=%u animated=%u\n",screen.frames,screen.refreshes,screen.clean_refreshes,screen.gray_refreshes,screen.color_refreshes,screen.night_refreshes,screen.animated_refreshes);
     state_file("power-cancel",true);
     if(power_worker>0)power_worker_stop(power_worker);
-    if(power>=0)close(power);touch_close(&touch,engine);FlutterEngineShutdown(engine);engine=NULL;FlutterEngineCollectAOTData(aot);display_close(&screen);free(clipboard);
+    if(radio_worker>0)power_worker_stop(radio_worker);
+    cover_close(&cover);
+    if(power>=0)close(power);touch_close(&touch,engine);r=FlutterEngineShutdown(engine);engine=NULL;FlutterEngineCollectAOTData(aot);display_close(&screen);free(clipboard);
+    if(r==kSuccess&&user_exit&&acquired&&!sleeping&&!terminating&&!screen.failures)record_clean_exit();
     fprintf(stderr,"[host] shutdown complete\n");
     while(tasks){Pending *p=tasks;tasks=p->next;free(p);}close(wake_pipe[0]);close(wake_pipe[1]);unlink(heartbeat_path);return 0;
 }

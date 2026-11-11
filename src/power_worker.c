@@ -10,7 +10,21 @@
 static volatile sig_atomic_t stopping;
 static void stop_requested(int signal_number){(void)signal_number;stopping=1;}
 
-pid_t power_worker_start(const char *path){
+uint64_t power_cover_due(uint64_t pending,uint64_t now){
+    /* Cover updates can hasten the first submit, never postpone or re-arm it. */
+    uint64_t due=now+100000000ULL;
+    return pending&&due<pending?due:pending;
+}
+enum lock_result power_lock_result(int status,bool wake_requested,bool retried,bool lid_closed){
+    if(wake_requested)return LOCK_RESUME;
+    if(!WIFEXITED(status))return LOCK_KEEP;
+    int code=WEXITSTATUS(status);
+    if(code==0&&!lid_closed)return LOCK_RESUME;
+    if(!retried&&((lid_closed&&(code==0||code==2))||code==3||code==75||code==76))return LOCK_RETRY;
+    return LOCK_KEEP;
+}
+
+static pid_t start_helper(const char *path,const char *action_name){
     /* Linux clone with no exit signal creates a separate wait class. No
      * memory, file descriptor table or signal handlers are shared. Linux
      * resets the exit signal during exec, so this supervisor MUST NOT exec.
@@ -27,7 +41,7 @@ pid_t power_worker_start(const char *path){
         action.sa_handler=stop_requested;
         sigaction(SIGTERM,&action,NULL);sigaction(SIGINT,&action,NULL);sigaction(SIGHUP,&action,NULL);
         pid_t helper=(pid_t)syscall(SYS_clone,SIGCHLD,NULL,NULL,NULL,0);
-        if(helper==0){execl(path,path,"suspend",(char*)NULL);_exit(127);}
+        if(helper==0){execl(path,path,action_name,(char*)NULL);_exit(127);}
         if(helper<0)_exit(127);
         int status=0;
         for(;;){
@@ -41,6 +55,8 @@ pid_t power_worker_start(const char *path){
     }
     return pid;
 }
+pid_t power_worker_start(const char *path){return start_helper(path,"suspend");}
+pid_t power_worker_restore_wifi(const char *path){return start_helper(path,"restore");}
 pid_t power_worker_poll(pid_t pid,int *status){
     return waitpid(pid,status,WNOHANG|__WCLONE);
 }

@@ -9,6 +9,7 @@ typedef struct {
     int (*write_number)(const char *,int);
     void (*invalidate)(void *);
     void *userdata;
+    void (*user_warmth)(int raw);
 } LightPanelOps;
 
 void light_panel_init(const char *,LightPanelOps);

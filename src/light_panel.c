@@ -101,7 +101,10 @@ bool light_panel_pointer(FlutterPointerEvent *p){
             if(!ops.write_number(COLOR_PATH,10-value)){level=value;unsaved=true;invalidate=true;fprintf(stderr,"[light] warmth=%d\n",level*10);}
             else fprintf(stderr,"[light] set warmth failed: %s\n",strerror(errno));
         }
-        if(p->phase==kUp||p->phase==kCancel||p->phase==kRemove)save_locked();
+        if(p->phase==kUp||p->phase==kCancel||p->phase==kRemove){
+            if(unsaved&&ops.user_warmth)ops.user_warmth(10-level);
+            save_locked();
+        }
     }else if(c&&c->mode==2)p->y+=88;
     if(c&&(p->phase==kRemove||p->phase==kCancel))memset(c,0,sizeof(*c));
     LightPanelOps callbacks=ops;pthread_mutex_unlock(&lock);

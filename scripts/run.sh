@@ -40,16 +40,28 @@ fi
 "$APP/runtime/reeden-kindle" --verify "$APP/bin/reeden-kindle" || exit 13
 mkdir "$STATE/active" || exit 14
 echo "$$ $(token $$)" > "$STATE/owner"
-rm -f "$STATE/host" "$STATE/heartbeat" "$STATE/ready" "$STATE/handoff" "$STATE/asleep" "$STATE/power-cancel" "$STATE/power-phase" "$STATE/power-phase.new"
+rm -f "$STATE/host" "$STATE/heartbeat" "$STATE/ready" "$STATE/handoff" "$STATE/asleep" "$STATE/power-cancel" "$STATE/power-phase" "$STATE/power-phase.new" "$STATE/clean-exit" "$STATE/native-was-connected"
 : > "$STATE/paused"
 if [ -f "$APP/logs/current.log" ]; then mv -f "$APP/logs/current.log" "$APP/logs/previous.log"; fi
 : > "$APP/logs/current.log"
-trap '"$APP/recover.sh"' EXIT
+REEDEN_CHOICES=
+rm -f "$STATE/cover-closed"
+finish_session() {
+    "$APP/recover.sh"
+    if [ -n "$REEDEN_CHOICES" ]; then
+        rm -f "$REEDEN_CHOICES/brightness" "$REEDEN_CHOICES/warmth" "$REEDEN_CHOICES/wifi"
+        rmdir "$REEDEN_CHOICES" 2>/dev/null || :
+    fi
+}
+trap finish_session EXIT
 trap 'exit 143' TERM HUP INT
 nohup "$APP/guardian.sh" > "$APP/logs/guardian.log" 2>&1 < /dev/null &
 read -r light < /sys/class/backlight/mxc_msp430.0/brightness
 read -r warm < /sys/class/backlight/lm3630a_led/color
 echo "$light $warm" > "$STATE/light"
+if [ -x "$APP/wifi.sh" ] && [ "$("$APP/wifi.sh" status)" = CONNECTED ]; then : > "$STATE/native-was-connected"; fi
+REEDEN_CHOICES=$(mktemp -d /tmp/reeden-kobo-choices-XXXXXX) || REEDEN_CHOICES=
+export REEDEN_CHOICES
 export REEDEN_KOBO_DIR="$APP"
 export REEDEN_BUNDLE_DIR="$APP/core"
 export REEDEN_ASSETS_DIR="$APP/ui-assets"

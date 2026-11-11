@@ -10,16 +10,20 @@ case "$1:$2:$3" in
     exec "$REEDEN_KOBO_DIR/wifi.sh" on;;
 esac
 [ "$1" = com.lab126.powerd ] || exit 69
+[ ! -f "$REEDEN_KOBO_DIR/state/asleep" ] && [ ! -d "$REEDEN_KOBO_DIR/state/recovering" ] || exit 69
 case "$3" in ''|*[!0-9]*) exit 64;; esac
 case "$2" in
   flIntensity)
     [ "$3" -le 24 ] || exit 64
-    echo $((($3 * 100 + 12) / 24)) > /sys/class/backlight/mxc_msp430.0/brightness
+    level=$((($3 * 100 + 12) / 24))
+    echo "$level" > /sys/class/backlight/mxc_msp430.0/brightness || exit 1
+    [ -z "${REEDEN_CHOICES:-}" ] || echo "$level" > "$REEDEN_CHOICES/brightness"
     ;;
   currentAmberLevel)
     [ "$3" -le 24 ] || exit 64
     raw=$((10 - ($3 * 10 + 12) / 24))
     echo "$raw" > /sys/class/backlight/lm3630a_led/color || exit 1
+    [ -z "${REEDEN_CHOICES:-}" ] || echo "$raw" > "$REEDEN_CHOICES/warmth"
     if [ -d "$REEDEN_KOBO_DIR/userdata" ]; then
       printf 'warmth=%d\n' $(((10 - raw) * 10)) > "$REEDEN_KOBO_DIR/userdata/kobo-light.conf.tmp" && \
         mv -f "$REEDEN_KOBO_DIR/userdata/kobo-light.conf.tmp" "$REEDEN_KOBO_DIR/userdata/kobo-light.conf"

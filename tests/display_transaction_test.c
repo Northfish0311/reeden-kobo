@@ -302,6 +302,28 @@ static void check_experimental_turns(Display *original){
     assert(d.last_accepted_marker==d.completed_marker&&d.marker!=d.last_accepted_marker);
     assert(display_wait(&d)==0);
     flush_now(&d);assert(d.failures==0&&d.committed[0]==200);
+    /* Identical composited glyph and background pixels, with and without a
+     * sweep request. This checks RGB bytes and routing, not panel appearance. */
+    for(unsigned variant=0;variant<3;variant++){
+        d.turn_options.profile=variant==0?TURN_OFF:TURN_STABLE;
+        d.evidence_options.reagl_bands=variant==2;
+        memset(d.pending,226,d.length);
+        size_t glyph=432*d.pending_stride+400*4;
+        uint8_t *g=d.pending+glyph;g[0]=76;g[1]=40;g[2]=180;g[3]=255;
+        for(unsigned y=810;y<842;y++)for(unsigned x=224;x<288;x++){
+            uint8_t *p=d.pending+y*d.pending_stride+x*4;p[0]=180;p[1]=205;p[2]=160;p[3]=255;
+        }
+        assert(display_arm_page_turn(&d,true,false,16));d.dirty=true;at=band_count;flush_now(&d);
+        assert(band_count==at&&last_wave==REFRESH_GLRC16&&last_flags==REFRESH_CFA_G2);
+        assert(*(uint32_t*)(d.mem+glyph)==0xff4c28b4u);
+        assert(*(uint32_t*)(d.mem+810*d.pending_stride+224*4)==0xffb4cda0u);
+        assert(!memcmp(d.pending,d.committed,d.length));
+        memset(d.pending,200,d.length);d.dirty=true;
+        assert(display_arm_page_turn(&d,true,false,16));flush_now(&d);
+        assert(band_count==at&&last_flags==REFRESH_CFA_G2); /* Erase old color. */
+    }
+    d.evidence_options.reagl_bands=false;
+    puts("PASS: colored glyph plus background retain RGB/CFA for off, stable and compensated turns");
     d.turn_options.profile=TURN_TIMED;
     /* A failed completion must not advance the logical committed image. */
     memset(d.pending,160,d.length);d.dirty=true;fail_complete_once=true;

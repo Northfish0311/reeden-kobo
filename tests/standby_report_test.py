@@ -40,6 +40,14 @@ class StandbyReportTest(unittest.TestCase):
                                 phase('resuming', 120 + seconds), '[power] mem returned=0 ' + STAMP)
                 self.assertIn(f'相隔约 {seconds} 秒', reason)
 
+    def test_new_supply_samples_are_not_guesses_about_usb_or_current(self):
+        self.assertIn('电池报告 Full', result('[power] screen-only: supply guard battery=Full external=off'))
+        enter = '[power] entering mem ' + STAMP
+        reason = result('[power] sample=before_mem battery=Discharging external=off capacity=82', enter,
+                        phase('suspended', 101), phase('resuming', 107), '[power] mem returned=0 ' + STAMP,
+                        '[power] sample=after_mem battery=Discharging external=off capacity=81')
+        self.assertIn('82% → 81%', reason)
+
     def test_error_missing_return_and_bad_clock(self):
         self.assertIn('返回错误 1', result('[power] entering mem ' + STAMP, '[power] mem returned=1 ' + STAMP))
         self.assertIn('没有返回结果', result('[power] entering mem ' + STAMP))

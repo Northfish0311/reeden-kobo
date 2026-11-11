@@ -54,6 +54,7 @@ jobs:
             'tests/refresh_policy_test.c src/refresh_policy.c' \
             'tests/input_test.c src/input.c' \
             'tests/power_worker_test.c src/power_worker.c' \
+            'tests/cover_test.c' \
             'tests/display_transaction_test.c src/refresh_policy.c src/turn_timing.c src/frame_evidence.c' \
             'tests/turn_timing_test.c src/turn_timing.c src/refresh_policy.c' \
             'tests/frame_evidence_test.c src/frame_evidence.c'
@@ -70,6 +71,8 @@ jobs:
           qemu-arm -L /usr/arm-linux-gnueabihf build/codec-test-armhf
           qemu-arm build/refresh-policy-test-armhf
           qemu-arm build/display-transaction-test-armhf
+          zig cc -target arm-linux-musleabihf -static -mcpu=cortex_a7 -O2 -Wall -Wextra -Werror -Isrc tests/cover_test.c -o build/cover-test-armhf
+          qemu-arm build/cover-test-armhf
 
   usb-tools:
     runs-on: ${{ matrix.os }}
