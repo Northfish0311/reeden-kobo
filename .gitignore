@@ -17,3 +17,9 @@ __pycache__/
 *.pyo
 .venv/
 venv/
+
+# Acceptance tool local artifacts (synthetic fixtures, collected evidence, run reports)
+/tools/acceptance/evidence/
+/tools/acceptance/regression/cases/
+/tools/acceptance/regression/out/
+/tools/acceptance/regression/results/
