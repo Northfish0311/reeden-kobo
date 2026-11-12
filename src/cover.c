@@ -54,6 +54,13 @@ void cover_close(Cover *c){
     if(c->fd>=0&&!c->shared_power)close(c->fd);
     *c=(Cover){.fd=-1,.observed=-1,.reported=-1};
 }
+void cover_seed(Cover *c){
+    resync(c,0);
+    /* Booting with the cover already shut is a state, not an edge: adopt what we
+       observed as already reported and drop the timer, so main() cannot settle a
+       COVER_CLOSED on its very first poll. */
+    c->reported=c->observed;c->due=0;
+}
 void cover_open(Cover *c,int power_fd,int touch_fd){
     *c=(Cover){.fd=-1,.observed=-1,.reported=-1};
     for(unsigned n=0;n<32;n++){
@@ -67,6 +74,6 @@ void cover_open(Cover *c,int power_fd,int touch_fd){
         fprintf(stderr,"[cover] candidate event%u %s\n",n,type==EV_SW?"SW_LID":"internal KEY_F1");
         if(type==EV_SW)break;
     }
-    if(c->fd>=0)resync(c,0);
+    if(c->fd>=0)cover_seed(c);
     else fprintf(stderr,"[cover] no supported internal lid input; power key remains available\n");
 }

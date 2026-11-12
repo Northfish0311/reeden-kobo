@@ -9,6 +9,7 @@ typedef struct {
     uint64_t due;
 } Cover;
 enum cover_edge { COVER_NONE, COVER_OPEN, COVER_CLOSED };
+void cover_seed(Cover *);
 void cover_open(Cover *,int power_fd,int touch_fd);
 void cover_close(Cover *);
 void cover_event(Cover *,const struct input_event *,uint64_t now);

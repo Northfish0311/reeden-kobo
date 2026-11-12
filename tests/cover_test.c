@@ -57,6 +57,16 @@ int main(void){
         send(&c,EV_KEY,KEY_POWER,1,1700*ms);
         assert(cover_settled(&c,2000*ms)==COVER_NONE);
         error=1;resync(&c,2100*ms);assert(cover_settled(&c,2400*ms)==COVER_NONE);error=0;
+        /* Boot with the cover already shut: seeding consumes the state instead of
+           reporting a fresh close edge, and the next real open still fires. */
+        c=(Cover){.fd=9,.type=kind,.code=variant?SW_LID:KEY_F1,.observed=-1,.reported=-1};
+        level=1;cover_seed(&c);
+        assert(cover_settled(&c,200*ms)==COVER_NONE);
+        assert(cover_settled(&c,5000*ms)==COVER_NONE);
+        level=0;send(&c,kind,c.code,0,5100*ms);
+        assert(cover_settled(&c,5249*ms)==COVER_NONE);
+        assert(cover_settled(&c,5250*ms)==COVER_OPEN);
+        assert(cover_settled(&c,6000*ms)==COVER_NONE);
     }
     puts("PASS: internal Kobo/lid switch, keyboard rejection, close/open, chatter, dropped events and resync");
     return 0;
