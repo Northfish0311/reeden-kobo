@@ -206,7 +206,15 @@ static int color_turn_bands(Display *d,bool forward,struct update *last,TurnTrac
     for(unsigned i=0;i<steps;i++){
         RefreshRegion r;
         unsigned w=d->page_turn_vertical?d->v.yres:d->v.xres,h=d->page_turn_vertical?d->v.xres:d->v.yres;
-        if(!refresh_color_band(w,h,steps,i,forward,&r))return 0;
+        if(!refresh_color_band(w,h,steps,i,forward,&r)){
+            /* Geometry rejected a band. Stop trying for this session instead of
+             * rebuilding and re-rejecting the same schedule on every page
+             * turn; plan is already CFA, so the ordinary single update below
+             * still keeps colour intact. */
+            d->turn_options.color_bands=false;
+            fprintf(stderr,"[color-turn] band %u/%u rejected; experimental colour sweep disabled for this session\n",i,steps);
+            return 0;
+        }
         if(d->page_turn_vertical)r=(RefreshRegion){0,r.left,r.height,r.width};
         updates[i]=(struct update){.region={r.top,r.left,r.width,r.height},
             .waveform=REFRESH_GLRC16,.mode=1,.flags=REFRESH_CFA_G2};
@@ -414,6 +422,11 @@ static int flush(Display *d,const uint8_t *cover){
             d->full=false;d->failures=0;d->refreshes++;
             if(plan.clean){d->last_clean=monotonic_ns();d->clean_refreshes++;}
             d->last_animated=animate&&bands>0;
+            /* last_animated means "the last sweep was an animated GREY one": it
+             * exists only to make the following colour page pay a full colour
+             * refresh (see the plan.last_animated branch above). A colour CFA
+             * sweep is already a full-screen transaction, so it must leave the
+             * flag clear instead of buying that refresh a second time. */
             if(plan.night&&!plan.color)d->night_refreshes++;
             if(plan.color)d->color_refreshes++;else d->gray_refreshes++;
             if(cover)d->request_clean_at=0;

@@ -338,6 +338,76 @@ static bool present(void *u,const void *pixels,size_t row,size_t height){
     bool result=display_present(u,pixels,row,height);wake();return result;
 }
 static void send_json(const char *channel,const char *json){FlutterPlatformMessage m={.struct_size=sizeof(m),.channel=channel,.message=(const uint8_t*)json,.message_size=strlen(json)};FlutterEngineSendPlatformMessage(engine,&m);}
+#define KEY_WORD_BITS ((unsigned)(sizeof(unsigned long)*8))
+#define KEY_BIT_WORDS (KEY_MAX/KEY_WORD_BITS+1)
+#ifndef REEDEN_HEADLESS_DIAGNOSTIC
+/* The power key node number is not an API. Firmware 4.46 exposes it as
+ * /dev/input/event2 and that stays first, because it is the only path that has
+ * run on a device. The scan exists so a different numbering cannot silently
+ * leave the user without a way to sleep or leave Reeden; it never replaces a
+ * node that already advertises KEY_POWER. */
+static bool key_bit(int fd,unsigned code){
+    unsigned long bits[KEY_BIT_WORDS];
+    memset(bits,0,sizeof(bits));
+    if(ioctl(fd,EVIOCGBIT(EV_KEY,sizeof(bits)),bits)<0)return false;
+    return (bits[code/KEY_WORD_BITS]>>(code%KEY_WORD_BITS))&1;
+}
+/* Internal Kobo inputs are host/GPIO, I2C or SPI; an external USB keyboard is
+ * not the key we are looking for. Same whitelist as cover.c's source_type. */
+static bool internal_input(int fd){
+    struct input_id id;
+    if(ioctl(fd,EVIOCGID,&id)<0)return false;
+    return id.bustype==BUS_HOST||id.bustype==BUS_I2C||id.bustype==BUS_SPI;
+}
+static bool same_device(int fd,int other){
+    struct stat a,b;
+    return other>=0&&!fstat(fd,&a)&&!fstat(other,&b)&&a.st_rdev==b.st_rdev;
+}
+static int grab_power_key(int fd,const char *source){
+    if(fd<0)return -1;
+    if(ioctl(fd,EVIOCGRAB,1)<0){int saved=errno;close(fd);errno=saved;return -1;}
+    char name[80]={0};
+    if(ioctl(fd,EVIOCGNAME(sizeof(name)-1),name)<0)name[0]='\0';
+    fprintf(stderr,"[power] exclusive power key acquired (%s name=%s)\n",source,*name?name:"unknown");
+    return fd;
+}
+/* Returns a grabbed descriptor, or -1 only when no node can be grabbed at all,
+ * which is the same condition that used to abort startup. */
+static int open_power_key(int touch_fd){
+    int legacy=open("/dev/input/event2",O_RDONLY|O_NONBLOCK|O_CLOEXEC);
+    if(legacy>=0&&key_bit(legacy,KEY_POWER))return grab_power_key(legacy,"event2");
+    if(legacy>=0)fprintf(stderr,"[power] event2 does not report KEY_POWER; scanning /dev/input\n");
+    else fprintf(stderr,"[power] event2 unavailable (%s); scanning /dev/input\n",strerror(errno));
+    for(unsigned n=0;n<32;n++){
+        if(n==2)continue;
+        char path[48];
+        snprintf(path,sizeof(path),"/dev/input/event%u",n);
+        int fd=open(path,O_RDONLY|O_NONBLOCK|O_CLOEXEC|O_NOFOLLOW);
+        if(fd<0)continue;
+        /* Verify before grabbing: EVIOCGRAB is exclusive, so an unverified grab
+         * would take the touch panel or a lid switch away from the rest of the
+         * process instead of adding a power key. */
+        if(!key_bit(fd,KEY_POWER)||!internal_input(fd)||same_device(fd,touch_fd)){
+            fprintf(stderr,"[power] event%u rejected: no KEY_POWER, external bus, or the touch panel\n",n);
+            close(fd);continue;
+        }
+        char source[32];
+        snprintf(source,sizeof(source),"event%u scanned",n);
+        int grabbed=grab_power_key(fd,source);
+        if(grabbed>=0){if(legacy>=0)close(legacy);return grabbed;}
+        fprintf(stderr,"[power] event%u grab failed: %s\n",n,strerror(errno));
+    }
+    /* Nothing verified. Keep the previous contract rather than refusing to
+     * start: a grabbable event2 behaves exactly as it did before this scan. */
+    if(legacy>=0){
+        int grabbed=grab_power_key(legacy,"event2 fallback, no candidate reported KEY_POWER");
+        if(grabbed<0)fprintf(stderr,"[power] exclusive power key failed: %s\n",strerror(errno));
+        return grabbed;
+    }
+    errno=ENODEV;
+    return -1;
+}
+#endif
 int main(int argc,char **argv){
     (void)argc;(void)argv;setvbuf(stderr,NULL,_IONBF,0);root=getenv("REEDEN_KOBO_DIR");if(!root){fprintf(stderr,"Run through run.sh; REEDEN_KOBO_DIR missing\n");return 64;}
     fprintf(stderr,"[host] Reeden Kobo experimental 0.7.5 / official core checked by installer\n");
@@ -462,9 +532,8 @@ int main(int argc,char **argv){
         if(ready&&!acquired&&access(handoff,F_OK)==0){
             if(display_acquire(&screen)||touch_open(&touch)){perror("hardware handoff");app_quit=1;break;}
             acquired=true;fprintf(stderr,"[host] display/touch ownership acquired\n");
-            power=open("/dev/input/event2",O_RDONLY|O_NONBLOCK|O_CLOEXEC);
-            if(power<0||ioctl(power,EVIOCGRAB,1)<0){perror("exclusive power key");app_quit=1;break;}
-            fprintf(stderr,"[power] exclusive power key acquired\n");
+            power=open_power_key(touch.fd);
+            if(power<0){perror("exclusive power key");app_quit=1;break;}
             char no_cover[4096];snprintf(no_cover,sizeof(no_cover),"%s/userdata/no-sleep-cover",root);
             bool cover_enabled=access(no_cover,F_OK)!=0;
             if(cover_enabled)cover_open(&cover,power,touch.fd);
@@ -551,6 +620,18 @@ int main(int argc,char **argv){
         }
         if(fds[2].revents&POLLIN){struct input_event ev[8];ssize_t k=read(power,ev,sizeof(ev));for(size_t i=0;k>0&&i<(size_t)k/sizeof(*ev);i++){
             if(cover.shared_power)cover_event(&cover,&ev[i],monotonic_ns());
+            if(ev[i].type==EV_SYN&&ev[i].code==SYN_DROPPED){
+                /* The kernel dropped events, so the cached press may be a key
+                 * that was already released. Ask the device for the real state
+                 * instead of guessing, or the next press needs two releases to
+                 * register and the panel appears stuck. */
+                unsigned long bits[KEY_BIT_WORDS];
+                memset(bits,0,sizeof(bits));
+                power_down=ioctl(power,EVIOCGKEY(sizeof(bits)),bits)>=0&&
+                    ((bits[KEY_POWER/KEY_WORD_BITS]>>(KEY_POWER%KEY_WORD_BITS))&1);
+                fprintf(stderr,"[power] SYN_DROPPED; resynced key state down=%d\n",power_down?1:0);
+                continue;
+            }
             if(ev[i].type!=EV_KEY||ev[i].code!=KEY_POWER)continue;
             if(ev[i].value==1)power_down=true;
             if(ev[i].value==0&&power_down){power_down=false;fprintf(stderr,"[power] key release\n");

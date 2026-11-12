@@ -1,10 +1,11 @@
 #!/bin/sh
 # Reeden on Kobo -- 接设备第一件事：枚举 /dev/input/event*
 #
-# 目的：确认 src/host.c:465 硬编码的 event2 确实是内部 GPIO 电源键、
+# 目的：确认 event2 是否就是内部 GPIO 电源键（host.c 首选该节点，但不要求）、
 #       src/input.c:26 默认的 event1 确实是触摸，并预判 src/cover.c
 #       能否识别到 SW_LID 或 gpio-keys/ntx_event0 上的 KEY_F1。
-#       编号不匹配就停手，不要在错误的设备上跑 C/D/F 组用例。
+#       若没有任何内部设备上报 KEY_POWER，host.c 会退回 event2（与旧版一致），
+#       此时电源键不可用，不要在错误的设备上跑 C/D/F 组用例。
 #
 # 用法（必须在【拔线、Nickel 主页】下执行；USB mass storage 时 NickelMenu 点不了）：
 #   1. 把本文件放到 E:\.adds\reeden-kobo\ 下（插 USB、点「连接」后复制）
@@ -61,7 +62,7 @@ outdir=$(dirname -- "$OUT")
       b = n % wb
       return int(v / pow2(b)) % 2
     }
-    function emit(   n, h, i, ev, lid, f1, ka, mt, gpio, role) {
+    function emit(   n, h, i, ev, lid, f1, ka, mt, gpio, pw, internal, role) {
       if (name == "" && handlers == "") return
       n = split(handlers, h, /[ \t]+/)
       if (n == 0) return
@@ -69,6 +70,8 @@ outdir=$(dirname -- "$OUT")
       f1  = hasbit(key, 59)        # KEY_F1 = 0x3b
       ka  = hasbit(key, 30)        # KEY_A = 0x1e
       mt  = hasbit(absb, 53)       # ABS_MT_POSITION_X = 0x35
+      pw  = hasbit(key, 116)       # KEY_POWER = 0x74, the bit host.c actually tests
+      internal = (bus ~ /^(0019|0018|001c)$/)   # BUS_HOST / BUS_I2C / BUS_SPI
       gpio = (name == "gpio-keys" || name == "ntx_event0") && f1 && !ka
       for (i = 1; i <= n; i++) {
         if (h[i] !~ /^event[0-9]+$/) continue
@@ -76,19 +79,24 @@ outdir=$(dirname -- "$OUT")
         role = ""
         if (mt || name ~ /[Tt]ouch|cyttsp|epd|ft5|goodix|elan/) role = role " TOUCH"
         if (name ~ /gpio-keys|ntx_event0|[Pp]ower/) role = role " GPIO_POWER"
+        if (pw) role = role " KEY_POWER"
+        if (internal) role = role " internal-bus"
         if (lid) role = role " SW_LID"
         if (gpio) role = role " INTERNAL_KEY_F1"
-        printf "event%-2s | Name=%-24s | SW_LID=%d KEY_F1=%d KEY_A=%d ABS_MT=%d |%s\n", \
-               ev, name, lid, f1, ka, mt, role
+        printf "event%-2s | Name=%-24s | SW_LID=%d KEY_F1=%d KEY_A=%d ABS_MT=%d KEY_POWER=%d |%s\n", \
+               ev, name, lid, f1, ka, mt, pw, role
         if (ev == "1" && (mt || name ~ /[Tt]ouch|cyttsp|epd|ft5|goodix|elan/)) event1_touch = 1
-        if (ev == "2" && (name ~ /gpio-keys|ntx_event0|[Pp]ower/)) event2_power = 1
+        # host.c 首选 event2，但只在它真的上报 KEY_POWER 时才直接用
+        if (ev == "2" && pw) event2_power = 1
+        if (pw && internal && power_src == "") power_src = ev
         # cover_open() 遇到 EV_SW 就 break，SW_LID 优先于 gpio-keys KEY_F1
         if (lid) cover_src = ev ":SW_LID"
         else if (gpio && cover_src == "") cover_src = ev ":internal KEY_F1"
       }
-      name = ""; handlers = ""; key = ""; sw = ""; absb = ""
+      name = ""; handlers = ""; key = ""; sw = ""; absb = ""; bus = ""
     }
     /^[[:space:]]*$/ { emit(); next }
+    /^I: Bus=/       { bus = $0; sub(/^I: Bus=/, "", bus); bus = substr(bus, 1, 4); next }
     /^N: Name=/      { name = $0; sub(/^N: Name=/, "", name); gsub(/"/, "", name); next }
     /^H: Handlers=/  { handlers = $0; sub(/^H: Handlers=/, "", handlers); next }
     /^B: KEY=/       { key = $0; sub(/^B: KEY=/, "", key); next }
@@ -97,8 +105,9 @@ outdir=$(dirname -- "$OUT")
     END {
       emit()
       print "---"
-      if (event2_power) print "PASS  event2 matches src/host.c:465 (internal GPIO power key)"
-      else              print "STOP  event2 is NOT a power key -> host.c EVIOCGRAB will fail / app_quit=1; do NOT run C/D/F cases"
+      if (event2_power) print "PASS  event2 reports KEY_POWER -> host.c takes it directly and never scans"
+      else if (power_src != "") print "PASS  KEY_POWER is on event" power_src " (internal bus) -> host.c scans and takes it; expect [power] exclusive power key acquired (event" power_src " scanned ...)"
+      else print "STOP  no internal device reports KEY_POWER -> host.c falls back to event2, so the power key will not sleep or exit; rely on the both-corner touch escape and do NOT run C/D/F cases"
       if (event1_touch) print "PASS  event1 matches src/input.c:26 (touch)"
       else              print "WARN  event1 is not recognisably touch -> set REEDEN_TOUCH before testing"
       if (cover_src != "") print "INFO  cover.c candidate expected at " cover_src
