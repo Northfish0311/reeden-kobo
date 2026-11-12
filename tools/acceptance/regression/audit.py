@@ -281,6 +281,26 @@ def read(name):
     return (PKG / name).read_text(encoding="utf-8")
 
 
+# The same documents live in two places depending on the export:
+#   - standalone acceptance package: right next to the scripts (PKG root)
+#   - in-repo tool set:              tools/acceptance/docs/ (renamed, so the
+#                                    repo's docs/ checklists stay the only
+#                                    files called "acceptance checklist")
+# Resolve either layout; a genuinely absent document still degrades to SKIP.
+DOC_CANDIDATES = {
+    "checklist": ("验收清单.md", "docs/19项判读说明.md"),
+    "static": ("静态审查报告.md", "docs/判读依据-源码静态审查.md"),
+    "readme": ("README.md",),
+}
+
+
+def resolve_doc(key):
+    for rel in DOC_CANDIDATES[key]:
+        if (PKG / rel).exists():
+            return rel
+    return None
+
+
 def check_docs():
     print("\n" + "=" * 78)
     print("[3] DOCUMENT / SCRIPT ID CONSISTENCY")
@@ -299,17 +319,19 @@ def check_docs():
     # two .ps1 scripts and the regression assets while keeping the repository's
     # own docs/ checklist authoritative, so missing documents are SKIP -- never
     # a failure, and never a reason to stop the source/ascii checks.
-    doc_names = ("验收清单.md", "静态审查报告.md", "README.md")
-    missing = [n for n in doc_names if not (PKG / n).exists()]
+    resolved = {k: resolve_doc(k) for k in DOC_CANDIDATES}
+    missing = [k for k, v in resolved.items() if v is None]
     if missing:
         print("  SKIP: document consistency checks (not shipped in this export)")
         print("        missing: %s" % ", ".join(missing))
         print("        docs/ checklist in the repo stays authoritative for wording.")
         return "SKIP" if ok else False
+    print("  documents: checklist=%s  static=%s  readme=%s"
+          % (resolved["checklist"], resolved["static"], resolved["readme"]))
 
-    checklist = read("验收清单.md")
-    static = read("静态审查报告.md")
-    readme = read("README.md")
+    checklist = read(resolved["checklist"])
+    static = read(resolved["static"])
+    readme = read(resolved["readme"])
 
     cl_ids = set(re.findall(r"^###\s+(\d+\.\d+)\s", checklist, re.M))
     auto_cl = {i for i in cl_ids if i[0] in "123456"}

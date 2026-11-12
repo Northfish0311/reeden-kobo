@@ -1,7 +1,7 @@
 # 验收证据三态判读工具（community.4 / community.5）
 
-> 定位：`docs/实机验收清单-v0.7.9-community.4.md` 的**只读取证辅助工具**。它不替代那份清单，也不代表官方测试结论。
-> 适用：Kobo Clara Colour（产品码 393）/ 固件 4.46.23852 / 应用目录 `E:\.adds\reeden-kobo`；代码基准 `v0.7.9-community.4`。
+> 定位：`docs/实机验收清单-v0.7.9-community.5.md`（差异集）与 `docs/实机验收清单-v0.7.9-community.4.md`（全量基线）的**只读取证辅助工具**。它不替代那两份清单，也不代表官方测试结论。
+> 适用：Kobo Clara Colour（产品码 393）/ 固件 4.46.23852 / 应用目录 `E:\.adds\reeden-kobo`；判读基线 `v0.7.9-community.4`，`.5` 增量另锚定 `v0.7.9-community.5`。
 
 community.5 保留 `.4` 日志格式，并补充识别 `[color-turn]` 彩色水波纹完成或失败记录。审计对两个标签分别锚定：19 项判读字符串仍核对 `v0.7.9-community.4`（不把历史测试改写成 `.5` 实机验证），而 `.5` 新增的 `[color-turn]` / `[sleep-cover] … keeping current page` / `cover_seed()` 另对 `v0.7.9-community.5` 核对，并反向断言 `.5` 已废弃的 `image not confirmed; cancelling suspend` 不再出现——否则文档与源码会悄悄脱节。盘符 `E:` 只是示例，需换成你实际的 Kobo 磁盘；固件号是验收目标，不代表本工具已经证明该固件兼容。详细更新范围见[community.5 发布说明](../../docs/releases/v0.7.9-community.5.md)。
 
@@ -19,7 +19,8 @@ community.5 保留 `.4` 日志格式，并补充识别 `[color-turn]` 彩色水�
 
 | 工具 | 职责 | 边界 |
 | --- | --- | --- |
-| `docs/实机验收清单-v0.7.9-community.4.md` | **权威验收口径**：用例、质量门禁、安全红线、阻塞项 | 文案与合格判定以它为准 |
+| `docs/实机验收清单-v0.7.9-community.5.md` | **权威验收口径（当前版本）**：`.5` 变更集、L/M/N 组 19 条新用例、3 条追加门禁 | 与 `.4` 冲突时以它为准 |
+| `docs/实机验收清单-v0.7.9-community.4.md` | **全量基线**：A~K 组 60 条用例、S1~S12 红线、C-01~C-10 只读检查、G-01~G-13 门禁、B-01~B-08 阻塞项 | `.5` 未改写/作废的部分继续按它执行 |
 | `tools/Check-SuspendGate.ps1` | **深睡四联判据的严格门禁**：按 pid 配对、校验 uptime 跨度、入口行只计数 | 深睡是否真正进入内核，以它为准 |
 | `tools/acceptance/`（本目录） | **19 项三态筛查**：告诉你哪些项证据齐、哪些不齐 | 是筛查工具，不是最终合格判定 |
 
@@ -29,7 +30,7 @@ community.5 保留 `.4` 日志格式，并补充识别 `[color-turn]` 彩色水�
 
 - `scripts/power.sh:7` 在脚本入口**无条件打印**该行，只要宿主以 `suspend` 调用就必有；
 - `power.sh:89` 的供电保护在 USB 充电 / 非 `Discharging` / `external=on` 时打印 `[power] screen-only: supply guard` 后**直接 `exit 3`**，设备只锁屏、从未进内核；
-- 而验收必须插 USB 才能读到 `power.log`，所以「见到入口行就算通过」在插线场景下**必然假阳性**。该口径已被 `docs/实机验收清单-v0.7.9-community.4.md` 第 4 节明确废止。
+- 而验收必须插 USB 才能读到 `power.log`，所以「见到入口行就算通过」在插线场景下**必然假阳性**。该口径已被 `docs/实机验收清单-v0.7.9-community.4.md` 第 4 节废止，`docs/实机验收清单-v0.7.9-community.5.md` 第 0 节再次明确「作废 · `invoked arg=suspend` 门禁」。
 
 4.3 只认 `entering mem` + `mem returned=0`：
 
@@ -87,6 +88,15 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\Check-Evidence.ps1
 | 6.2 | Overnight battery readings（人工） | 无日志 |
 
 人工确认项 **3.3 / 5.4 / 6.2** 恒为 `NEED-EVIDENCE`，脚本不做自动判定。
+
+每项「怎么操作、期望看到什么、失败怎么排查、用什么回退」见：
+
+| 文档 | 内容 |
+| --- | --- |
+| [`docs/19项判读说明.md`](docs/19项判读说明.md) | 19 项逐条说明：前置 → 操作步骤 → 期望现象 → 看哪份日志哪一行 → 失败怎么办（含 `no-sleep-cover` 人工回退） |
+| [`docs/判读依据-源码静态审查.md`](docs/判读依据-源码静态审查.md) | 每条判读规则的源码依据：三条代码路径、日志字符串真实出处、兜底分支、21 条静态可预判失败点、第 10 章 `.5` 增量 |
+
+这两份是**工具的判读说明书**；验收口径与合格判定仍以 `docs/实机验收清单-v0.7.9-community.5.md` 为准。
 
 ## 三态与退出码
 
