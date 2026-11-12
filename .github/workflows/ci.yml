@@ -132,8 +132,11 @@ jobs:
       - name: Shell syntax check
         # A broken launcher or power helper only shows up on the device, where every
         # recover cycle costs a reboot; catch it here in seconds.
+        # tools/*.sh 是设备侧诊断脚本（例如接设备第一步跑的输入设备枚举），
+        # 同样只会在真机上暴露语法错误，一并纳入门禁。
         run: |
-          for script in scripts/*.sh; do
+          for script in scripts/*.sh tools/*.sh; do
+            [ -e "$script" ] || continue
             echo "checking $script"
             sh -n "$script" || exit 1
           done
