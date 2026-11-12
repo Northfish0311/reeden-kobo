@@ -40,14 +40,22 @@ uint64_t refresh_deadline(uint64_t pixels_due,uint64_t clean_due,uint64_t next_a
 bool refresh_duplicate_clean(uint64_t now,uint64_t last_clean,bool same_pixels){
     return same_pixels&&last_clean&&now>=last_clean&&now-last_clean<=500000000ULL;
 }
-bool refresh_band(unsigned width,unsigned height,unsigned steps,unsigned index,
-                  bool forward,RefreshRegion *out){
-    if(!out||!width||!height||steps<2||steps>REFRESH_BANDS_MAX||index>=steps||width/16<steps)return false;
+static bool aligned_band(unsigned width,unsigned height,unsigned steps,unsigned index,
+                         bool forward,unsigned alignment,RefreshRegion *out){
+    if(!out||!width||!height||steps<2||steps>REFRESH_BANDS_MAX||index>=steps||width/alignment<steps)return false;
     unsigned band=forward?steps-1-index:index;
-    unsigned left=(unsigned)((uint64_t)width*band/steps)/16*16;
-    unsigned right=band+1==steps?width:(unsigned)((uint64_t)width*(band+1)/steps)/16*16;
+    unsigned left=(unsigned)((uint64_t)width*band/steps)/alignment*alignment;
+    unsigned right=band+1==steps?width:(unsigned)((uint64_t)width*(band+1)/steps)/alignment*alignment;
     if(right<=left)return false;
     *out=(RefreshRegion){left,0,right-left,height};return true;
+}
+bool refresh_band(unsigned width,unsigned height,unsigned steps,unsigned index,
+                  bool forward,RefreshRegion *out){
+    return aligned_band(width,height,steps,index,forward,16,out);
+}
+bool refresh_color_band(unsigned width,unsigned height,unsigned steps,unsigned index,
+                        bool forward,RefreshRegion *out){
+    return aligned_band(width,height,steps,index,forward,48,out);
 }
 unsigned refresh_night_parts(const uint8_t *old,const uint8_t *next,size_t stride,
                              unsigned width,unsigned height,RefreshPart *out){

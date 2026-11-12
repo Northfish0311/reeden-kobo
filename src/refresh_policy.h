@@ -35,6 +35,9 @@ bool refresh_duplicate_clean(uint64_t now,uint64_t last_clean,bool same_pixels);
 /* Non-overlapping, 16-pixel-aligned bands; forward reveals right to left. */
 bool refresh_band(unsigned width,unsigned height,unsigned steps,unsigned index,
                   bool forward,RefreshRegion *out);
+/* Experimental CFA bands keep both the 16px update and 3px color-cell phase. */
+bool refresh_color_band(unsigned width,unsigned height,unsigned steps,unsigned index,
+                        bool forward,RefreshRegion *out);
 enum { REFRESH_PARTS_MAX=17 };
 typedef struct {RefreshRegion region;bool color;} RefreshPart;
 /* Sparse colored text on a dark page: keep CFA confined to aligned row

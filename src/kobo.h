@@ -17,7 +17,7 @@ typedef struct {
     unsigned completed_marker,last_accepted_marker; bool hw_inverted,hw_state_known,use_light_overlay;
     int page_turn_direction; uint64_t page_turn_until;
     bool page_turn_vertical; unsigned page_turn_steps;
-    unsigned animated_refreshes;
+    unsigned animated_refreshes,color_animated_refreshes;
     bool direct_night; unsigned localized_color_refreshes;
     /* A colour page that follows an animated grey page needs a full colour
      * refresh, otherwise the first C16 pass looks washed out. */

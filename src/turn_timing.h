@@ -7,7 +7,7 @@ typedef enum { TURN_STABLE, TURN_OFF, TURN_TIMED } TurnProfile;
 typedef struct {
     TurnProfile profile;
     unsigned bands,span_us,min_gap_us,max_inflight;
-    bool trace;
+    bool trace,color_bands;
 } TurnOptions;
 
 /* Invalid explicit settings fail closed to the unchanged stable profile. */

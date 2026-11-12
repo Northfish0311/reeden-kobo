@@ -23,6 +23,9 @@ static bool pending_markers[1024],needs_submission_wait;
 static unsigned band_left[128];
 static unsigned band_top[128];
 static bool expect_parts;
+static bool expect_color_bands;
+static unsigned color_band_count,fail_color_band_at,cancel_at_color_band;
+static unsigned color_left[8],color_top[8];
 static unsigned part_color_rows,part_gray_rows;
 static uint64_t last_band_submit;
 static unsigned cancel_at_band,fail_submission_at,peak_outstanding;
@@ -70,6 +73,13 @@ int __wrap_ioctl(int fd,unsigned long request,...){
             else assert(u->mode==0&&(u->waveform==HWTCON_RAW_DAY_BAND||u->waveform==HWTCON_RAW_NIGHT_BAND));
             if(band_count==fail_band_at){fail_band_at=0;errno=EIO;return -1;}
             band_left[band_count%128]=u->left;band_top[band_count%128]=u->top;needs_submission_wait=true;
+        }else if(expect_color_bands&&(u->width<display->v.xres||u->height<display->v.yres)){
+            assert(u->mode==1&&u->waveform==REFRESH_GLRC16&&u->flags==REFRESH_CFA_G2);
+            assert(!inverted&&!outstanding&&u->left%48==0&&u->top%48==0);
+            color_left[color_band_count%8]=u->left;color_top[color_band_count%8]=u->top;
+            color_band_count++;
+            if(color_band_count==fail_color_band_at){fail_color_band_at=0;errno=EIO;return -1;}
+            needs_submission_wait=true;
         }else if(expect_parts&&u->height<display->v.yres){
             assert(u->mode==1&&u->left==0&&u->width==display->v.xres&&u->top%48==0);
             if(u->flags==REFRESH_CFA_G2){assert(u->waveform==REFRESH_GLRC16);part_color_rows+=u->height;}
@@ -85,6 +95,7 @@ int __wrap_ioctl(int fd,unsigned long request,...){
         assert(*(uint32_t*)p==submitted&&needs_submission_wait);
         needs_submission_wait=false;submission_waits++;
         if(cancel_at_band&&band_count==cancel_at_band){cancel_at_band=0;display_cancel_page_turn(display);}
+        if(cancel_at_color_band&&color_band_count==cancel_at_color_band){cancel_at_color_band=0;display_cancel_page_turn(display);}
         if(fail_submission_at==submission_waits){fail_submission_at=0;errno=EIO;return -1;}
     }else{
         assert(request==0xc008462fUL);unsigned marker=*(uint32_t*)p;
@@ -336,6 +347,116 @@ static void check_experimental_turns(Display *original){
     free(d.pending);free(d.committed);free(d.mem);pthread_mutex_destroy(&d.lock);display=original;
     puts("PASS: off/timed profiles, repeated and reversed arms, queue cap, cancellation, submission failure, immutable framebuffer, unknown rotation/color fallback and failed-completion cache");
 }
+static void color_page(Display *d,unsigned background,bool dense){
+    memset(d->pending,background,d->length);
+    for(unsigned y=0;y<d->v.yres;y++)for(unsigned x=0;x<d->v.xres;x++){
+        uint8_t *p=d->pending+y*d->pending_stride+x*4;p[3]=255;
+        if(dense){p[0]=background+10;p[1]=background+20;p[2]=background;}
+        else if(y>=810&&y<842&&x>=224&&x<288){p[0]=180;p[1]=205;p[2]=160;}
+    }
+    uint8_t *glyph=d->pending+432*d->pending_stride+400*4;
+    glyph[0]=76;glyph[1]=40;glyph[2]=180;
+    d->dirty=true;
+}
+static void color_pixels_unchanged(const Display *d){
+    assert(!memcmp(d->pending,d->committed,d->length));
+    for(unsigned y=0;y<d->v.yres;y++)for(unsigned x=0;x<d->v.xres;x++){
+        const uint8_t *p=d->pending+y*d->pending_stride+x*4;
+        uint32_t expected=((uint32_t)p[0]<<16)|((uint32_t)p[1]<<8)|p[2]|0xff000000u;
+        assert(*(uint32_t*)(d->mem+y*d->f.line_length+x*4)==expected);
+    }
+}
+static void check_color_turns(Display *original){
+    Display d={.fd=99,.pending_stride=1072*4,.length=1072*1448*4};display=&d;
+    d.v.xres=1072;d.v.yres=1448;d.v.rotate=3;d.f.line_length=d.pending_stride;
+    d.v.red=(struct fb_bitfield){0,8,0};d.v.green=(struct fb_bitfield){8,8,0};
+    d.v.blue=(struct fb_bitfield){16,8,0};d.v.transp=(struct fb_bitfield){24,8,0};
+    d.pending=malloc(d.length);d.committed=malloc(d.length);d.mem=calloc(1,d.length);
+    assert(d.pending&&d.committed&&d.mem);pthread_mutex_init(&d.lock,NULL);atomic_init(&d.turn_cancel,false);
+    strcpy(d.mode,"balanced");d.frames=1;d.full=true;color_page(&d,210,false);flush_now(&d);
+    unsigned gray_before=band_count;
+    color_page(&d,200,false);assert(display_arm_page_turn(&d,true,false,16));flush_now(&d);
+    assert(!d.animated_refreshes&&!color_band_count); /* Default is unchanged. */
+    d.turn_options.color_bands=true;expect_color_bands=true;
+    d.evidence_options.quality_after_turn=true;
+    for(unsigned night=0;night<2;night++){
+        color_page(&d,night?20:220,false);display_full(&d);flush_now(&d);
+        unsigned cleans=d.clean_refreshes;
+        for(unsigned vertical=0;vertical<2;vertical++)for(unsigned forward=0;forward<2;forward++){
+            color_page(&d,night?(forward?40:60):(forward?190:200),forward==0);
+            assert(display_arm_page_turn(&d,forward,vertical,32));
+            unsigned at=color_band_count,animations=d.color_animated_refreshes;peak_outstanding=0;
+            flush_now(&d);
+            assert(color_band_count==at+8&&d.color_animated_refreshes==animations+1);
+            assert(peak_outstanding==1&&!d.last_animated&&!inverted&&band_count==gray_before);
+            assert(d.clean_refreshes==cleans&&!d.quality_refreshes);
+            for(unsigned i=0;i<7;i++){
+                unsigned a=vertical?color_top[(at+i)%8]:color_left[(at+i)%8];
+                unsigned b=vertical?color_top[(at+i+1)%8]:color_left[(at+i+1)%8];
+                assert(forward?a>b:a<b);
+            }
+            color_pixels_unchanged(&d);
+        }
+        memset(d.pending,night?70:180,d.length);d.dirty=true;
+        assert(display_arm_page_turn(&d,true,false,16));unsigned at=color_band_count;flush_now(&d);
+        assert(color_band_count==at+8&&last_flags==REFRESH_CFA_G2); /* Erase old color via CFA. */
+        color_pixels_unchanged(&d);
+    }
+    /* Color remains protected on clean/HD/expired/non-page/unknown geometry/off. */
+    for(unsigned kind=0;kind<6;kind++){
+        color_page(&d,210,false);display_full(&d);flush_now(&d);
+        color_page(&d,190,false);unsigned at=color_band_count;
+        if(kind!=4)assert(display_arm_page_turn(&d,true,false,16));
+        if(kind==0)display_full(&d);
+        if(kind==1)strcpy(d.mode,"hd");
+        if(kind==2)d.page_turn_until=0;
+        if(kind==3)d.v.rotate=0;
+        if(kind==5)d.turn_options.profile=TURN_OFF;
+        flush_now(&d);assert(color_band_count==at&&band_count==gray_before);
+        color_pixels_unchanged(&d);
+        strcpy(d.mode,"balanced");d.v.rotate=3;d.turn_options.profile=TURN_STABLE;
+    }
+    /* Do not remove the established full-color reset after a gray sweep. */
+    memset(d.pending,210,d.length);display_full(&d);flush_now(&d);
+    memset(d.pending,190,d.length);d.dirty=true;assert(display_arm_page_turn(&d,true,false,16));flush_now(&d);
+    assert(d.last_animated);gray_before=band_count;
+    color_page(&d,210,false);assert(display_arm_page_turn(&d,true,false,16));
+    unsigned at=color_band_count;flush_now(&d);assert(color_band_count==at&&last_wave==REFRESH_GCC16);
+    /* An unchanged colored corner outside a gray dirty box must survive even
+     * if the third CFA strip is rejected and a full-page fallback is needed. */
+    memset(d.pending,220,d.length);d.pending[0]=180;display_full(&d);flush_now(&d);
+    for(unsigned y=200;y<1000;y++)for(unsigned x=200;x<850;x++){
+        uint8_t *p=d.pending+y*d.pending_stride+x*4;p[0]=p[1]=p[2]=190;
+    }
+    d.dirty=true;assert(display_arm_page_turn(&d,true,false,16));fail_color_band_at=color_band_count+3;
+    unsigned animations=d.color_animated_refreshes;flush_now(&d);
+    assert(!d.turn_options.color_bands&&d.color_animated_refreshes==animations&&!outstanding);
+    assert(last_wave==REFRESH_GLRC16&&last_flags==REFRESH_CFA_G2&&band_count==gray_before);
+    color_pixels_unchanged(&d);
+    at=color_band_count;color_page(&d,200,false);assert(display_arm_page_turn(&d,true,false,16));flush_now(&d);
+    assert(color_band_count==at); /* Failed experiments stay disabled in-session. */
+    for(unsigned failure=0;failure<2;failure++){
+        d.turn_options.color_bands=true;color_page(&d,failure?180:210,false);
+        assert(display_arm_page_turn(&d,true,false,16));
+        if(failure)cancel_at_color_band=color_band_count+3;
+        else fail_submission_at=submission_waits+2;
+        flush_now(&d);
+        assert(!d.turn_options.color_bands&&d.color_animated_refreshes==animations&&!outstanding);
+        assert(last_wave==REFRESH_GLRC16&&last_flags==REFRESH_CFA_G2);
+        color_pixels_unchanged(&d);
+    }
+    /* An uncertain completion cannot claim a committed image or keep drawing. */
+    d.turn_options.color_bands=true;color_page(&d,220,false);
+    assert(display_arm_page_turn(&d,true,false,16));fail_complete_marker=d.marker+2;
+    d.last_refresh=d.last_present=d.first_dirty=0;display_flush(&d);
+    assert(app_quit&&!d.turn_options.color_bands&&d.committed[0]==180);
+    assert(d.color_animated_refreshes==animations&&outstanding==1&&display_wait(&d)==0);
+    app_quit=0;flush_now(&d);color_pixels_unchanged(&d);
+    expect_color_bands=false;
+    assert(!display_inversion(&d,false));
+    free(d.pending);free(d.committed);free(d.mem);pthread_mutex_destroy(&d.lock);display=original;
+    puts("PASS: opt-in color sweep, serial CFA, day/night glyphs/backgrounds, both axes/directions, RGB preservation, safe gates and error/cancel fallback; optical quality untested");
+}
 static void check_pixel_transfer(Display *original){
     /* Distinct input and framebuffer strides, nonzero offsets, every gray
      * level including lower-edge antialiasing. Padding is never a pixel. */
@@ -425,6 +546,7 @@ int main(void){
     check_page_turns(&d);
     check_localized_color(&d);
     check_experimental_turns(&d);
+    check_color_turns(&d);
     check_pixel_transfer(&d);
     /* A failed global write must retain its recovery obligation and abort. */
     fail_inversion=true;d.direct_night=false;display_full(&d);flush_now(&d);assert(app_quit&&access(path,F_OK)==0);

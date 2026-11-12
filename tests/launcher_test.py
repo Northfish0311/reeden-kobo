@@ -48,7 +48,7 @@ echo "$*" >> "$(dirname "$0")/../framebuffer-calls"
 ''')
     script(app / "runtime/reeden-kindle", '''
 [ "$1" = --verify ] && exit 0
-printf '%s\\n' "${REEDEN_TURN_PROFILE-unset}" "${REEDEN_TEXT_BAND_PATH-unset}" "${REEDEN_TEXT_QUALITY_AFTER_TURN-unset}" "${REEDEN_TEXT_QUALITY_EVERY-unset}" > "$REEDEN_KOBO_DIR/host-env"
+printf '%s\\n' "${REEDEN_TURN_PROFILE-unset}" "${REEDEN_TEXT_BAND_PATH-unset}" "${REEDEN_TEXT_QUALITY_AFTER_TURN-unset}" "${REEDEN_TEXT_QUALITY_EVERY-unset}" "${REEDEN_COLOR_TURN-unset}" > "$REEDEN_KOBO_DIR/host-env"
 exec /bin/sleep 5
 ''')
     (app / "version").write_text("SN,4.9.77,4.46.23836,000-391\n")
@@ -59,7 +59,7 @@ exec /bin/sleep 5
     (app / "SHA256SUMS").write_text(''.join(
         f'{hashlib.sha256(path.read_bytes()).hexdigest()}  {path.relative_to(app).as_posix()}\n'
         for path in files))
-    keys = ("REEDEN_TURN_PROFILE", "REEDEN_TEXT_BAND_PATH", "REEDEN_TEXT_QUALITY_AFTER_TURN", "REEDEN_TEXT_QUALITY_EVERY")
+    keys = ("REEDEN_TURN_PROFILE", "REEDEN_TEXT_BAND_PATH", "REEDEN_TEXT_QUALITY_AFTER_TURN", "REEDEN_TEXT_QUALITY_EVERY", "REEDEN_COLOR_TURN")
     env = {k: v for k, v in os.environ.items() if k not in keys}
     p = subprocess.run(["sh", str(app / "run.sh")], timeout=10, env=env)
     log = (app / "logs/launcher.log").read_text()
@@ -72,15 +72,16 @@ exec /bin/sleep 5
     assert not (app / "state/handoff").exists(), "Hardware handoff leaked"
 
     host_env = app / "host-env"
-    assert host_env.read_text().splitlines() == ["unset"] * 4
-    inherited = dict(zip(keys, ("timed", "reagl", "1", "5")))
+    assert host_env.read_text().splitlines() == ["unset"] * 5
+    inherited = dict(zip(keys, ("timed", "reagl", "1", "5", "cfa")))
     for profile, expected in {
-        "stable": ["stable", "unset", "unset", "unset"],
-        "off": ["off", "unset", "unset", "unset"],
-        "timed": ["timed", "unset", "unset", "unset"],
-        "reagl": ["stable", "reagl", "unset", "unset"],
-        "clean": ["stable", "unset", "1", "unset"],
-        "sweep": ["stable", "unset", "1", "5"],
+        "stable": ["stable", "unset", "unset", "unset", "unset"],
+        "off": ["off", "unset", "unset", "unset", "unset"],
+        "timed": ["timed", "unset", "unset", "unset", "unset"],
+        "reagl": ["stable", "reagl", "unset", "unset", "unset"],
+        "clean": ["stable", "unset", "1", "unset", "unset"],
+        "sweep": ["stable", "unset", "1", "5", "unset"],
+        "color": ["stable", "unset", "unset", "unset", "cfa"],
         "invalid": list(inherited.values()),
     }.items():
         host_env.unlink()

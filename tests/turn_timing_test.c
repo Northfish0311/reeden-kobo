@@ -5,10 +5,14 @@
 #include <stdio.h>
 
 static const char *keys[]={"REEDEN_TURN_PROFILE","REEDEN_TURN_TRACE","REEDEN_TURN_BANDS",
-    "REEDEN_TURN_SPAN_US","REEDEN_TURN_MIN_GAP_US","REEDEN_TURN_MAX_INFLIGHT"};
+    "REEDEN_TURN_SPAN_US","REEDEN_TURN_MIN_GAP_US","REEDEN_TURN_MAX_INFLIGHT","REEDEN_COLOR_TURN"};
 static void clear(void){for(unsigned i=0;i<sizeof(keys)/sizeof(*keys);i++)unsetenv(keys[i]);}
 int main(void){
-    TurnOptions o;clear();assert(turn_options_load(&o)&&o.profile==TURN_STABLE&&!o.trace);
+    TurnOptions o;clear();assert(turn_options_load(&o)&&o.profile==TURN_STABLE&&!o.trace&&!o.color_bands);
+    setenv("REEDEN_COLOR_TURN","cfa",1);assert(turn_options_load(&o)&&o.color_bands);
+    setenv("REEDEN_COLOR_TURN","off",1);assert(turn_options_load(&o)&&!o.color_bands);
+    setenv("REEDEN_COLOR_TURN","yes",1);assert(!turn_options_load(&o)&&!o.color_bands);
+    clear();
     setenv(keys[0],"off",1);assert(turn_options_load(&o)&&o.profile==TURN_OFF);
     setenv(keys[0],"timed",1);assert(turn_options_load(&o)&&o.profile==TURN_TIMED&&o.bands==16);
     const char *bad[]={"","-1","+16","16x"," 16","9999999999999999999999999999999"};

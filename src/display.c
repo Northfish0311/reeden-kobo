@@ -128,14 +128,15 @@ static unsigned next_marker(Display *d){if(++d->marker==0)++d->marker;return d->
  * markers before another framebuffer/global inversion change, including on
  * a partial failure. Never wait on a marker rejected by SEND_UPDATE. */
 static int submit_sequence(Display *d,struct update *updates,unsigned n,struct update *last,uint64_t gap_ns,
-                           const unsigned *positions,unsigned span_pixels,TurnTrace *trace){
+                           const unsigned *positions,unsigned span_pixels,unsigned max_inflight,TurnTrace *trace){
     struct update accepted[REFRESH_BANDS_MAX];unsigned count=0,done=0;bool failed=false,cancelled=false;
     uint64_t first_submit=0,last_submit=0,min_gap=UINT64_MAX;
-    bool timed=positions!=NULL;uint64_t schedule_start=timed?monotonic_ns():0;
+    bool timed=positions!=NULL,interruptible=timed||max_inflight;
+    uint64_t schedule_start=timed?monotonic_ns():0;
     if(!n||n>REFRESH_BANDS_MAX)return 0;
     for(unsigned i=0;i<n;i++){
-        if(timed&&(app_quit||atomic_load(&d->turn_cancel))){cancelled=true;break;}
-        if(timed&&d->turn_options.max_inflight&&count-done>=d->turn_options.max_inflight){
+        if(interruptible&&(app_quit||atomic_load(&d->turn_cancel))){cancelled=true;break;}
+        if(max_inflight&&count-done>=max_inflight){
             if(wait_marker(d,&accepted[done],true,trace)<0){app_quit=1;return -1;}
             done++;
         }
@@ -146,10 +147,10 @@ static int submit_sequence(Display *d,struct update *updates,unsigned n,struct u
             uint64_t now=monotonic_ns(),due=timed?turn_due_ns(&d->turn_options,schedule_start,last_submit,positions[i],span_pixels):last_submit+gap_ns;
             if(now<due){
                 struct timespec delay={(time_t)((due-now)/1000000000ULL),(long)((due-now)%1000000000ULL)};
-                while(nanosleep(&delay,&delay)<0&&errno==EINTR){if(timed&&(app_quit||atomic_load(&d->turn_cancel)))break;}
+                while(nanosleep(&delay,&delay)<0&&errno==EINTR){if(interruptible&&(app_quit||atomic_load(&d->turn_cancel)))break;}
             }
         }
-        if(timed&&(app_quit||atomic_load(&d->turn_cancel))){cancelled=true;break;}
+        if(interruptible&&(app_quit||atomic_load(&d->turn_cancel))){cancelled=true;break;}
         struct update u=updates[i];u.marker=next_marker(d);
         uint64_t submitted_at=(gap_ns||timed)?monotonic_ns():0;
         if(send_update(d,&u,trace)<0){failed=true;break;}
@@ -172,7 +173,7 @@ static int submit_sequence(Display *d,struct update *updates,unsigned n,struct u
     if((gap_ns||timed)&&count>1)fprintf(stderr,"[page-turn] submissions=%u span_ms=%.1f min_gap_ms=%.1f\n",count,(last_submit-first_submit)/1000000.0,min_gap/1000000.0);
     return 1;
 }
-/* Color pages and explicit cleans never use the animation sweep. */
+/* The original grayscale sweep never receives color or explicit cleans. */
 static int page_turn_bands(Display *d,bool forward,bool night,struct update *last,TurnTrace *trace){
     bool timed=d->turn_options.profile==TURN_TIMED;
     bool reagl=d->evidence_options.reagl_bands;
@@ -191,9 +192,34 @@ static int page_turn_bands(Display *d,bool forward,bool night,struct update *las
     /* A narrower advancing edge rather than ten page-height coarse blocks.
      * The original speed setting controls both band count and pacing. */
     uint64_t gap_ns=steps<=16?6000000ULL:steps<=24?8000000ULL:10000000ULL;
-    int result=submit_sequence(d,updates,steps,last,gap_ns,timed?positions:NULL,positions[steps-1],trace);if(result!=1)return result;
+    int result=submit_sequence(d,updates,steps,last,gap_ns,timed?positions:NULL,positions[steps-1],timed?d->turn_options.max_inflight:0,trace);if(result!=1)return result;
     d->animated_refreshes++;
     fprintf(stderr,"[page-turn] bands=%u direction=%s vertical=%u night=%u path=%s wave=%u mode=%u\n",steps,forward?"next":"prev",d->page_turn_vertical,night,reagl?"reagl":"stable",last->waveform,last->mode);
+    return 1;
+}
+/* Opt-in only: keep RGB/CFA throughout, serialize FULL color transactions,
+ * and never append the grayscale quality probe. Optical quality is untested. */
+static int color_turn_bands(Display *d,bool forward,struct update *last,TurnTrace *trace){
+    unsigned steps=d->page_turn_steps;
+    if(steps>8)steps=8;
+    struct update updates[8];
+    for(unsigned i=0;i<steps;i++){
+        RefreshRegion r;
+        unsigned w=d->page_turn_vertical?d->v.yres:d->v.xres,h=d->page_turn_vertical?d->v.xres:d->v.yres;
+        if(!refresh_color_band(w,h,steps,i,forward,&r))return 0;
+        if(d->page_turn_vertical)r=(RefreshRegion){0,r.left,r.height,r.width};
+        updates[i]=(struct update){.region={r.top,r.left,r.width,r.height},
+            .waveform=REFRESH_GLRC16,.mode=1,.flags=REFRESH_CFA_G2};
+    }
+    int result=submit_sequence(d,updates,steps,last,0,NULL,0,1,trace);
+    if(result!=1){
+        d->turn_options.color_bands=false;
+        fprintf(stderr,"[color-turn] incomplete; experimental color sweep disabled for this session\n");
+        return result;
+    }
+    d->animated_refreshes++;d->color_animated_refreshes++;
+    fprintf(stderr,"[color-turn] bands=%u direction=%s vertical=%u path=cfa wave=%u mode=1; optical quality unverified\n",
+        steps,forward?"next":"prev",d->page_turn_vertical,REFRESH_GLRC16);
     return 1;
 }
 static int night_color_parts(Display *d,const RefreshPart *parts,unsigned n,struct update *last,TurnTrace *trace){
@@ -205,7 +231,7 @@ static int night_color_parts(Display *d,const RefreshPart *parts,unsigned n,stru
             .mode=1,.flags=parts[i].color?REFRESH_CFA_G2:0};
         if(parts[i].color)color_rows+=r.height;
     }
-    int result=submit_sequence(d,updates,n,last,0,NULL,0,trace);if(result!=1)return result;
+    int result=submit_sequence(d,updates,n,last,0,NULL,0,0,trace);if(result!=1)return result;
     d->localized_color_refreshes++;
     fprintf(stderr,"[night-color] regions=%u cfa_rows=%u/%u\n",n,color_rows,d->v.yres);
     return 1;
@@ -293,9 +319,19 @@ static int flush(Display *d,const uint8_t *cover){
        (d->v.xres!=1072||d->v.yres!=1448||d->v.rotate!=3))animate=false;
     if(d->evidence_options.reagl_bands&&
        (d->v.xres!=1072||d->v.yres!=1448||d->v.rotate!=3))animate=false;
+    bool color_animate=semantic_turn&&d->turn_options.color_bands&&
+        d->turn_options.profile!=TURN_OFF&&!plan.clean&&!inversion_change&&!plan.hw_invert&&
+        (plan.color||plan.frame_color)&&d->v.xres==1072&&d->v.yres==1448&&d->v.rotate==3&&
+        !d->v.xoffset&&!d->v.yoffset;
+    if(color_animate){
+        /* Even unchanged color outside the dirty box is part of a full sweep.
+         * A failed sequence must also fall back to CFA, never gray. */
+        plan.color=true;plan.waveform=REFRESH_GLRC16;plan.flags=REFRESH_CFA_G2;
+        part_count=0;
+    }
     bool forward=d->page_turn_direction>0;
     if(cover||plan.major||plan.clean||now>d->page_turn_until)d->page_turn_direction=0;
-    if(animate||part_count)plan.region=(RefreshRegion){0,0,d->v.xres,d->v.yres};
+    if(animate||color_animate||part_count)plan.region=(RefreshRegion){0,0,d->v.xres,d->v.yres};
     if(trace)trace->planned=monotonic_ns();
     /* Wake before either wait or submit, as in KOReader's MTK path. */
     if(display_command("fiti_power 1")){perror("display wake");app_quit=1;turn_trace_dump(trace,"wake-error",monotonic_ns());pthread_mutex_unlock(&d->lock);return -1;}
@@ -306,8 +342,8 @@ static int flush(Display *d,const uint8_t *cover){
         FrameEvidenceInfo info={.width=d->v.xres,.height=d->v.yres,.logical_stride=d->pending_stride,
             .rotation=d->v.rotate,.fb_stride=d->f.line_length,.xoffset=d->v.xoffset,.yoffset=d->v.yoffset,
             .red=d->v.red,.green=d->v.green,.blue=d->v.blue,.alpha=d->v.transp,.plan=plan,
-            .old_valid=d->committed_valid,.animated=animate,.trace_id=trace?trace->id:0,
-            .band_path=d->evidence_options.reagl_bands?"reagl":"stable",
+            .old_valid=d->committed_valid,.animated=animate||color_animate,.trace_id=trace?trace->id:0,
+            .band_path=color_animate?"color-cfa":d->evidence_options.reagl_bands?"reagl":"stable",
             .profile=d->turn_options.profile==TURN_OFF?"off":d->turn_options.profile==TURN_TIMED?"timed":"stable"};
         capture=frame_capture_begin(&d->evidence_options,&info,d->committed,source,d->mem,d->length);
     }
@@ -337,7 +373,8 @@ static int flush(Display *d,const uint8_t *cover){
         /* REAGL and Kaleido both require UPDATE_MODE_FULL on this model;
          * that flag does not itself mean a full-screen flashing cleanup. */
         struct update u={0};
-        int bands=animate?page_turn_bands(d,forward,plan.night,&u,trace):
+        int bands=color_animate?color_turn_bands(d,forward,&u,trace):
+                  animate?page_turn_bands(d,forward,plan.night,&u,trace):
                   part_count?night_color_parts(d,parts,part_count,&u,trace):0;
         if(bands<0){frame_capture_end(&capture,"sequence-wait-error",d->last_accepted_marker,0);turn_trace_dump(trace,"sequence-wait-error",monotonic_ns());pthread_mutex_unlock(&d->lock);return -1;}
         /* Diagnostic comparison only, default OFF. Reuse the ordinary gray

@@ -23,6 +23,11 @@ bool turn_options_load(TurnOptions *out){
     unsigned trace=0;
     if(!number("REEDEN_TURN_TRACE",0,1,&trace))goto invalid;
     o.trace=trace;
+    p=getenv("REEDEN_COLOR_TURN");
+    if(p&&strcmp(p,"off")){
+        if(strcmp(p,"cfa"))goto invalid;
+        o.color_bands=true;
+    }
     if(o.profile==TURN_TIMED&&
        (!number("REEDEN_TURN_BANDS",4,32,&o.bands)||
         !number("REEDEN_TURN_SPAN_US",40000,350000,&o.span_us)||

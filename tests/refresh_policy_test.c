@@ -107,6 +107,24 @@ int main(void){
     RefreshRegion band;
     assert(!refresh_band(64,64,10,0,true,&band));
     assert(!refresh_band(1072,1448,10,10,true,&band));
+    /* CFA keeps 48px phase, with no missing/overlapping pixels at either
+     * native edge, including the non-multiple-of-48 panel tail. */
+    for(unsigned vertical=0;vertical<2;vertical++)for(unsigned steps=2;steps<=8;steps++)for(unsigned direction=0;direction<2;direction++){
+        unsigned w=vertical?HEIGHT:WIDTH,h=vertical?WIDTH:HEIGHT;
+        unsigned coverage[HEIGHT]={0},previous=direction?w:0;
+        for(unsigned i=0;i<steps;i++){
+            assert(refresh_color_band(w,h,steps,i,direction,&band));
+            assert(band.left%48==0&&band.width>=48&&band.top==0&&band.height==h);
+            assert(direction?band.left+band.width==previous:band.left==previous);
+            previous=direction?band.left:band.left+band.width;
+            for(unsigned x=band.left;x<band.left+band.width;x++)coverage[x]++;
+        }
+        assert(previous==(direction?0:w));
+        for(unsigned x=0;x<w;x++)assert(coverage[x]==1);
+    }
+    assert(!refresh_color_band(64,64,2,0,true,&band));
+    assert(!refresh_color_band(WIDTH,HEIGHT,8,8,true,&band));
+    assert(!refresh_color_band(WIDTH,HEIGHT,0,0,true,&band));
     /* Sparse current and erased colored words get localized CFA row groups;
      * every pixel belongs to exactly one disjoint region with a stable CFA phase. */
     memset(old,0,bytes);memset(next,0,bytes);

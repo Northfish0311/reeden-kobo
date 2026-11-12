@@ -128,14 +128,15 @@ export SSL_CERT_FILE="$APP/certs/ca-certificates.crt" SSL_CERT_DIR="$APP/certs"
 unset LD_LIBRARY_PATH LD_PRELOAD LD_AUDIT
 # Optional per-device animation profile. It lives in userdata so reinstalling or
 # upgrading keeps the choice, and stays empty on a stock install.
-#   stable (default) | off | timed | reagl | clean
+#   stable (default) | off | timed | reagl | clean | sweep | color (experimental)
 if [ -f "$APP/userdata/turn-profile" ]; then
     profile=$(head -c 32 "$APP/userdata/turn-profile" | tr -d ' \t\r\n')
     case "$profile" in
-        stable|off|timed) export REEDEN_TURN_PROFILE="$profile"; unset REEDEN_TEXT_BAND_PATH REEDEN_TEXT_QUALITY_AFTER_TURN REEDEN_TEXT_QUALITY_EVERY ;;
-        reagl) export REEDEN_TURN_PROFILE=stable REEDEN_TEXT_BAND_PATH=reagl; unset REEDEN_TEXT_QUALITY_AFTER_TURN REEDEN_TEXT_QUALITY_EVERY ;;
-        clean) export REEDEN_TURN_PROFILE=stable REEDEN_TEXT_QUALITY_AFTER_TURN=1; unset REEDEN_TEXT_BAND_PATH REEDEN_TEXT_QUALITY_EVERY ;;
-        sweep) export REEDEN_TURN_PROFILE=stable REEDEN_TEXT_QUALITY_AFTER_TURN=1 REEDEN_TEXT_QUALITY_EVERY=5; unset REEDEN_TEXT_BAND_PATH ;;
+        stable|off|timed) export REEDEN_TURN_PROFILE="$profile"; unset REEDEN_TEXT_BAND_PATH REEDEN_TEXT_QUALITY_AFTER_TURN REEDEN_TEXT_QUALITY_EVERY REEDEN_COLOR_TURN ;;
+        reagl) export REEDEN_TURN_PROFILE=stable REEDEN_TEXT_BAND_PATH=reagl; unset REEDEN_TEXT_QUALITY_AFTER_TURN REEDEN_TEXT_QUALITY_EVERY REEDEN_COLOR_TURN ;;
+        clean) export REEDEN_TURN_PROFILE=stable REEDEN_TEXT_QUALITY_AFTER_TURN=1; unset REEDEN_TEXT_BAND_PATH REEDEN_TEXT_QUALITY_EVERY REEDEN_COLOR_TURN ;;
+        sweep) export REEDEN_TURN_PROFILE=stable REEDEN_TEXT_QUALITY_AFTER_TURN=1 REEDEN_TEXT_QUALITY_EVERY=5; unset REEDEN_TEXT_BAND_PATH REEDEN_COLOR_TURN ;;
+        color) export REEDEN_TURN_PROFILE=stable REEDEN_COLOR_TURN=cfa; unset REEDEN_TEXT_BAND_PATH REEDEN_TEXT_QUALITY_AFTER_TURN REEDEN_TEXT_QUALITY_EVERY ;;
     esac
 fi
 cd "$APP/core" || exit 18
