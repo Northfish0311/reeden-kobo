@@ -80,21 +80,40 @@ jobs:
   usb-tools:
     runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false
       matrix:
         # Keep the Apple Silicon baseline explicit instead of following latest.
         os: [ubuntu-latest, macos-15, windows-latest]
-        python: ['3.10', '3.12']
-    # All six platform/interpreter combinations must pass before packaging.
+    # Reuse each runner for both interpreters: arm64 macOS capacity is limited.
+    # All six platform/interpreter combinations still gate publication.
     env:
       PYTHONUTF8: '1'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: ${{ matrix.python }}
-      - name: Test USB installation and removal on simulated devices
+          python-version: '3.10'
+      - name: Test simulated USB installation and removal (Python 3.10)
         shell: bash
         run: |
+          python -c 'import sys; assert sys.version_info[:2] == (3, 10), sys.version'
+          python tests/oneclick_installer_test.py
+          python tests/usb_preflight_test.py
+          python tests/update_flow_test.py
+          python tests/uninstall_test.py
+          python tests/archive_security_test.py
+          python tests/official_core_test.py
+          python tests/device_uninstall_test.py
+          python tests/desktop_launcher_test.py
+          python install.py --help
+          python uninstall.py --help
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Test simulated USB installation and removal (Python 3.12)
+        shell: bash
+        run: |
+          python -c 'import sys; assert sys.version_info[:2] == (3, 12), sys.version'
           python tests/oneclick_installer_test.py
           python tests/usb_preflight_test.py
           python tests/update_flow_test.py
