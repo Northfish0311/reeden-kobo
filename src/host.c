@@ -496,14 +496,13 @@ int main(int argc,char **argv){
         if(acquired&&sleeping&&cover_at&&monotonic_ns()>=cover_at){
             cover_at=0;
             if(*cover_path){
-                if(display_cover(&screen,cover_path,cover_width,cover_height,cover_channels)<0){
-                    fprintf(stderr,"[sleep-cover] image not confirmed; cancelling suspend\n");
-                    if(!app_quit)set_sleep(&touch,false);
-                    continue;
-                }
-                fprintf(stderr,"[sleep-cover] displayed Reeden image channels=%u\n",cover_channels);
+                if(display_cover(&screen,cover_path,cover_width,cover_height,cover_channels)<0)
+                    fprintf(stderr,"[sleep-cover] image not confirmed; keeping current page, continuing to suspend\n");
+                else
+                    fprintf(stderr,"[sleep-cover] displayed Reeden image channels=%u\n",cover_channels);
             }
             else fprintf(stderr,"[sleep-cover] not registered; keeping current page\n");
+            if(app_quit)continue;
             if(display_wait(&screen)<0){perror("sleep display completion");app_quit=1;continue;}
             write_number("/sys/class/backlight/mxc_msp430.0/brightness",0);
             suspend_at=monotonic_ns();

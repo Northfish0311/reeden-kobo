@@ -90,6 +90,9 @@ jobs:
       PYTHONUTF8: '1'
     steps:
       - uses: actions/checkout@v4
+        with:
+          # The read-only evidence audit anchors its baseline to the .4 tag.
+          fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
           python-version: '3.10'
@@ -107,6 +110,17 @@ jobs:
           python tests/desktop_launcher_test.py
           python install.py --help
           python uninstall.py --help
+
+      - name: Run read-only evidence regressions on Windows
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: |
+          python tools/acceptance/regression/build_fixtures.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python tools/acceptance/regression/audit.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & ./tools/acceptance/regression/run-regression.ps1 -RunTag ci
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
@@ -132,8 +146,11 @@ jobs:
       - name: Shell syntax check
         # A broken launcher or power helper only shows up on the device, where every
         # recover cycle costs a reboot; catch it here in seconds.
+        # tools/*.sh 是设备侧诊断脚本（例如接设备第一步跑的输入设备枚举），
+        # 同样只会在真机上暴露语法错误，一并纳入门禁。
         run: |
-          for script in scripts/*.sh; do
+          for script in scripts/*.sh tools/*.sh; do
+            [ -e "$script" ] || continue
             echo "checking $script"
             sh -n "$script" || exit 1
           done
@@ -154,6 +171,34 @@ jobs:
           git archive --format=zip -o "release-files/Reeden-Kobo-${TAG}-Source.zip" HEAD
           printf '%s\n' "$(git rev-parse HEAD)" > release-files/COMMIT.txt
           (cd release-files && sha256sum *.zip COMMIT.txt > SHA256SUMS)
+      - name: Verify archives before publication
+        run: |
+          python3 - <<'PY'
+          import ast, hashlib, os, pathlib, subprocess, zipfile
+          tag = os.environ['GITHUB_REF_NAME']
+          root = pathlib.Path('release-files')
+          source = root / f'Reeden-Kobo-{tag}-Source.zip'
+          oneclick = root / f'Reeden-Kobo-Adapter-{tag}-OneClick.zip'
+          def contents(path, prefix):
+              with zipfile.ZipFile(path) as z:
+                  assert z.testzip() is None, 'ZIP CRC failure'
+                  files = [i for i in z.infolist() if not i.is_dir()]
+                  assert all(i.filename.startswith(prefix) for i in files)
+                  names = [i.filename[len(prefix):] for i in files]
+                  assert len(names) == len(set(names)), 'duplicate paths'
+                  return {name: hashlib.sha256(z.read(i)).hexdigest() for name, i in zip(names, files)}
+          assert contents(source, '') == contents(oneclick, 'reeden-kobo/'), 'archive contents differ'
+          with zipfile.ZipFile(source) as z:
+              tree = ast.parse(z.read('install.py').decode('utf-8'))
+              version = next(ast.literal_eval(n.value) for n in tree.body if isinstance(n, ast.Assign) and any(isinstance(t, ast.Name) and t.id == 'PORT_VERSION' for t in n.targets))
+              assert tag == 'v' + version, 'installer version mismatch'
+              assert f'docs/releases/{tag}.md' in z.namelist(), 'missing release notes'
+          assert (root / 'COMMIT.txt').read_text().strip() == subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip()
+          for line in (root / 'SHA256SUMS').read_text().splitlines():
+              digest, name = line.split(maxsplit=1)
+              assert hashlib.sha256((root / name).read_bytes()).hexdigest() == digest, name
+          print('PASS: matching ZIP contents, installer version, release notes, commit and SHA256SUMS')
+          PY
       - name: Publish experimental release
         uses: softprops/action-gh-release@v2
         with:

@@ -76,6 +76,16 @@ class StandbyGuardTest(unittest.TestCase):
         self.assertIn('short mem return after 0s; wake source unknown', log)
         self.assertIn('sample=after_mem battery=Discharging external=off capacity=81', log)
 
+    def test_cover_fallback_keeps_lock_but_does_not_ignore_fatal_display_error(self):
+        # Source-order guard only; device/main-loop integration remains untested.
+        host = (ROOT / 'src/host.c').read_text(encoding='utf-8')
+        block = host.split('if(acquired&&sleeping&&cover_at&&', 1)[1].split(
+            'if(acquired&&sleeping&&radio_worker<0&&', 1)[0]
+        self.assertIn('keeping current page, continuing to suspend', block)
+        self.assertNotIn('set_sleep(&touch,false)', block)
+        self.assertLess(block.index('if(app_quit)continue;'), block.index('display_wait(&screen)'))
+        self.assertLess(block.index('display_wait(&screen)'), block.index('suspend_at=monotonic_ns()'))
+
 
 if __name__ == '__main__':
     unittest.main()
