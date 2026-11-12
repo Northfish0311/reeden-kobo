@@ -3,7 +3,9 @@
 """Independent static audit of the acceptance package.
 
 Three checks, all offline and read-only:
-  1. source  -- verify chapter-9 log strings against the REAL .4 tag (3b804d2)
+  1. source  -- verify chapter-9 log strings against the REAL .4 tag (3b804d2),
+                then verify the community.5 additions against the .5 tag, and
+                confirm the strings .5 retired are gone (docs must not cite them)
   2. ascii   -- byte-level ASCII + forbidden write-token scan of both .ps1 files
   3. docs    -- 19 check IDs across checklist / checker / chapter 9 + README topics
 
@@ -41,6 +43,7 @@ def _find_repo():
 REPO = _find_repo()
 TAG = "3b804d2"   # == v0.7.9-community.4, independent of whatever origin/main is
 TAG_NAME = "v0.7.9-community.4"
+TAG5_NAME = "v0.7.9-community.5"
 
 SOURCE_FILES = [
     "scripts/power.sh", "scripts/run.sh", "scripts/recover.sh",
@@ -115,6 +118,25 @@ LEGACY_ONLY = [
     "[cover] extra listener disabled; existing power handling unchanged",
 ]
 
+# community.5 additions. The .4 baseline above cannot cover these, so they get
+# their own tag anchor instead of being "verified" by synthetic fixtures only.
+STRINGS5 = [
+    ("[color-turn] bands=%u direction=%s vertical=%u path=cfa wave=%u mode=1",
+     ["src/display.c"]),
+    ("[color-turn] incomplete; experimental color sweep disabled for this session",
+     ["src/display.c"]),
+    ("[sleep-cover] image not confirmed; keeping current page, continuing to suspend",
+     ["src/host.c"]),
+    ("REEDEN_COLOR_TURN=cfa", ["scripts/run.sh"]),
+    ("void cover_seed(Cover *c)", ["src/cover.c"]),
+]
+
+# .4 emitted these; .5 replaced them. A checklist that still cites them as
+# current behaviour mis-reads every .5 session, so their absence is asserted.
+RETIRED_IN_5 = [
+    ("[sleep-cover] image not confirmed; cancelling suspend", "src/host.c"),
+]
+
 MANUAL_IDS = {"3.3", "5.4", "6.2"}
 EXPECTED_IDS = {"%d.%d" % (c, n) for c, n in
                 [(1, 1), (1, 2), (1, 3), (1, 4), (1, 5),
@@ -125,13 +147,20 @@ EXPECTED_IDS = {"%d.%d" % (c, n) for c, n in
                  (6, 1), (6, 2)]}
 
 
-def git_show(path):
+def git_show(path, ref=TAG):
     out = subprocess.run(["git", "-C", str(REPO), "show",
-                          "%s:%s" % (TAG, path)],
+                          "%s:%s" % (ref, path)],
                          capture_output=True)
     if out.returncode != 0:
         return ""
     return out.stdout.decode("utf-8", "replace")
+
+
+def tag_sha(name):
+    resolved = subprocess.run(
+        ["git", "-C", str(REPO), "rev-parse", name + "^{commit}"],
+        capture_output=True, text=True)
+    return resolved.stdout.strip() if resolved.returncode == 0 else ""
 
 
 def check_source():
@@ -141,13 +170,10 @@ def check_source():
     # Anchor to the immutable tag, never to a moving origin/main. If the tag
     # is ever repointed, this check fails loudly instead of silently auditing
     # the wrong source tree.
-    resolved = subprocess.run(
-        ["git", "-C", str(REPO), "rev-parse", TAG_NAME + "^{commit}"],
-        capture_output=True, text=True)
-    tag_sha = resolved.stdout.strip() if resolved.returncode == 0 else ""
-    tag_ok = tag_sha.startswith(TAG)
+    tag_sha_value = tag_sha(TAG_NAME)
+    tag_ok = tag_sha_value.startswith(TAG)
     print("  tag anchor: %s^{commit} = %s  expected prefix %s -> %s"
-          % (TAG_NAME, tag_sha or "<unresolved>", TAG,
+          % (TAG_NAME, tag_sha_value or "<unresolved>", TAG,
              "OK" if tag_ok else "MISMATCH"))
     print("  NOTE: origin/main is intentionally NOT used (it has already moved).")
     blobs = {p: git_show(p) for p in SOURCE_FILES}
@@ -170,7 +196,50 @@ def check_source():
                 print("  OK   %-60s found in %s (compat only)" % (legacy[:60], f))
     print("\n  RESULT: %d/%d strings verified against real .4 source."
           % (len(STRINGS) - len(missing), len(STRINGS)))
-    return (not missing) and tag_ok
+    return (not missing) and tag_ok and check_source5()
+
+
+def check_source5():
+    """Verify community.5 additions against the .5 tag, and the retired strings.
+
+    A missing .5 tag degrades to SKIP: a .4-only clone must still be auditable.
+    """
+    print("\n" + "-" * 78)
+    print("[1b] COMMUNITY.5 DELTA against tag %s" % TAG5_NAME)
+    print("-" * 78)
+    sha = tag_sha(TAG5_NAME)
+    if not sha:
+        print("  SKIP: tag %s is not present in this clone "
+              "(nothing to verify against)." % TAG5_NAME)
+        return True
+    print("  tag anchor: %s^{commit} = %s -> OK" % (TAG5_NAME, sha))
+    files = sorted({f for _, fs in STRINGS5 for f in fs})
+    files += sorted({f for _, f in RETIRED_IN_5 if f not in files})
+    blobs = {p: git_show(p, sha) for p in files}
+    ok = True
+    for literal, wanted in STRINGS5:
+        hits = ["%s:%d" % (f, i)
+                for f in wanted
+                for i, line in enumerate(blobs.get(f, "").splitlines(), 1)
+                if literal in line]
+        if hits:
+            print("  OK   %-70s %s" % (literal[:70], ",".join(hits)))
+        else:
+            ok = False
+            print("  MISS %s  (fixtures would be imitating a string .5 never emits)"
+                  % literal)
+    print("\n  -- strings retired by .5 must be gone (docs may not cite them) --")
+    for literal, path in RETIRED_IN_5:
+        if literal in blobs.get(path, ""):
+            ok = False
+            print("  STILL PRESENT in %s: %s" % (path, literal))
+        else:
+            print("  OK   retired and absent from %s: %s" % (path, literal))
+    print("\n  RESULT: %d/%d .5 strings verified; %d retired string(s) confirmed gone."
+          % (len(STRINGS5) - sum(1 for l, _ in STRINGS5
+                                 if not any(l in b for b in blobs.values())),
+             len(STRINGS5), len(RETIRED_IN_5)))
+    return ok
 
 
 def check_ascii():
@@ -283,6 +352,7 @@ def check_docs():
                        and all(s in readme for s in ("`0`", "`1`", "`2`", "`3`"))),
         "fixture usage": "fixture" in readme.lower(),
         "baseline tag referenced": TAG_NAME in readme,
+        "community.5 delta referenced": TAG5_NAME in readme,
         "stale origin/main SHA removed": not stale_baseline,
     }
     print("  README topics (semantic keywords):")
@@ -298,6 +368,39 @@ def check_docs():
         ok = False
     else:
         print("  static report baseline tag: OK")
+
+    # .5 replaced "[sleep-cover] image not confirmed; cancelling suspend" with
+    # "keeping current page, continuing to suspend". Quoting the old line is
+    # useful ("this is gone now"), but an unqualified citation reads as current
+    # behaviour to anyone grepping the checklist, so the same line must say so.
+    docs = (("验收清单.md", checklist), ("静态审查报告.md", static),
+            ("README.md", readme))
+    marks = ("已废弃", "不再产生", "已替换", "勿用", "不要用", "不得用于",
+             "退出运行时", "旧行")
+    offenders = [(n, ln.strip()[:56]) for n, t in docs for ln in t.splitlines()
+                 for lit, _ in RETIRED_IN_5
+                 if lit in ln and not any(m in ln for m in marks)]
+    print("  retired .5 string quoted unmarked  : %s"
+          % (offenders if offenders else "NONE (OK)"))
+    if offenders:
+        ok = False
+
+    # .5 ships an opt-in colour sweep. The package must say how to enable it and
+    # must not let a completion log stand in for optical quality.
+    blob = checklist + readme + static
+    colour = {
+        "colour profile switch documented": "turn-profile" in blob,
+        "profile value 'color' documented": "`color`" in blob or "= color" in blob,
+        "cover_seed / open-lid-first precondition": ("cover_seed" in blob
+                                                     or "先开盖" in blob),
+        "colour logs != optical quality": ("光学" in blob or "观感" in blob
+                                           or "彩字" in blob),
+    }
+    print("  community.5 semantics in docs:")
+    for k, v in colour.items():
+        print("     %-42s %s" % (k, "OK" if v else "MISSING"))
+        if not v:
+            ok = False
     return ok
 
 

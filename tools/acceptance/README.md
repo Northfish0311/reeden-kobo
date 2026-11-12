@@ -3,7 +3,7 @@
 > 定位：`docs/实机验收清单-v0.7.9-community.4.md` 的**只读取证辅助工具**。它不替代那份清单，也不代表官方测试结论。
 > 适用：Kobo Clara Colour（产品码 393）/ 固件 4.46.23852 / 应用目录 `E:\.adds\reeden-kobo`；代码基准 `v0.7.9-community.4`。
 
-community.5 保留 `.4` 日志格式，并补充识别 `[color-turn]` 彩色水波纹完成或失败记录。`.4` 基线审计仍锚定原标签，不把历史测试改写为 `.5` 实机验证。盘符 `E:` 只是示例，需换成你实际的 Kobo 磁盘；固件号是验收目标，不代表本工具已经证明该固件兼容。详细更新范围见[community.5 发布说明](../../docs/releases/v0.7.9-community.5.md)。
+community.5 保留 `.4` 日志格式，并补充识别 `[color-turn]` 彩色水波纹完成或失败记录。审计对两个标签分别锚定：19 项判读字符串仍核对 `v0.7.9-community.4`（不把历史测试改写成 `.5` 实机验证），而 `.5` 新增的 `[color-turn]` / `[sleep-cover] … keeping current page` / `cover_seed()` 另对 `v0.7.9-community.5` 核对，并反向断言 `.5` 已废弃的 `image not confirmed; cancelling suspend` 不再出现——否则文档与源码会悄悄脱节。盘符 `E:` 只是示例，需换成你实际的 Kobo 磁盘；固件号是验收目标，不代表本工具已经证明该固件兼容。详细更新范围见[community.5 发布说明](../../docs/releases/v0.7.9-community.5.md)。
 
 ## 解决什么问题
 

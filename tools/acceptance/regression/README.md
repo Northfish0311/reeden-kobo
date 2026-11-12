@@ -84,13 +84,14 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\run-regression.ps1 -RunTag
 
 退出码：`0` 全 PASS；`1` 有 NEED-EVIDENCE 无 FAIL；`2` 至少一项 FAIL；`3` 找不到证据源。
 
-## `audit.py` 的三项检查
+## `audit.py` 的四项检查
 
 | 检查 | 内容 |
 | --- | --- |
 | `source` | 43 条日志字面量逐条对 `git show v0.7.9-community.4:<path>` 核对（锚定不可变 tag，**不使用会移动的 origin/main**），并校验 tag 未被重指 |
+| `source [1b]` | community.5 增量：`[color-turn]` 两条、`[sleep-cover] … keeping current page`、`REEDEN_COLOR_TURN=cfa`、`cover_seed()` 逐条对 `git show v0.7.9-community.5:<path>` 核对；并**反向断言** `.5` 已废弃的 `[sleep-cover] image not confirmed; cancelling suspend` 已从 `src/host.c` 消失。克隆里没有 `.5` tag 时降级为 `SKIP`，不影响 `.4` 基线 |
 | `ascii` | 两个 `.ps1` 字节级纯 ASCII、无 BOM、无禁止的写设备令牌、Check 不做时间判定 |
-| `docs` | 19 个检查 ID 在清单 / 脚本 / 报告三处一致 + README 语义主题；**三份中文文档缺失时输出 `SKIP` 而非 FAIL**（本目录作为工具集随仓库分发时，文案以 `docs/` 下清单为准） |
+| `docs` | 19 个检查 ID 在清单 / 脚本 / 报告三处一致 + README 语义主题；中文文档若引用 `.5` 已废弃的行，**同一行必须标注「已废弃/不再产生」**，否则判红；**三份中文文档缺失时输出 `SKIP` 而非 FAIL**（本目录作为工具集随仓库分发时，文案以 `docs/` 下清单为准） |
 
 ## 目录产物
 
