@@ -19,7 +19,7 @@ community.5 保留 `.4` 日志格式，并补充识别 `[color-turn]` 彩色水�
 
 | 工具 | 职责 | 边界 |
 | --- | --- | --- |
-| `docs/实机验收清单-v0.7.9-community.5.md` | **权威验收口径（当前版本）**：`.5` 变更集、L/M/N 组 19 条新用例、3 条追加门禁 | 与 `.4` 冲突时以它为准 |
+| `docs/实机验收清单-v0.7.9-community.5.md` | **按被测版本区分的验收口径**：`.5` 跑 M/N 共 15 条；待发布 main 另加 L 组，共 21 条 | “仅 main”项不得用于判定 `.5` 下载包；与 `.4` 冲突时按对应版本执行 |
 | `docs/实机验收清单-v0.7.9-community.4.md` | **全量基线**：A~K 组 60 条用例、S1~S12 红线、C-01~C-10 只读检查、G-01~G-13 门禁、B-01~B-08 阻塞项 | `.5` 未改写/作废的部分继续按它执行 |
 | `tools/Check-SuspendGate.ps1` | **深睡四联判据的严格门禁**：按 pid 配对、校验 uptime 跨度、入口行只计数 | 深睡是否真正进入内核，以它为准 |
 | `tools/acceptance/`（本目录） | **19 项三态筛查**：告诉你哪些项证据齐、哪些不齐 | 是筛查工具，不是最终合格判定 |
@@ -96,7 +96,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\Check-Evidence.ps1
 | [`docs/19项判读说明.md`](docs/19项判读说明.md) | 19 项逐条说明：前置 → 操作步骤 → 期望现象 → 看哪份日志哪一行 → 失败怎么办（含 `no-sleep-cover` 人工回退） |
 | [`docs/判读依据-源码静态审查.md`](docs/判读依据-源码静态审查.md) | 每条判读规则的源码依据：三条代码路径、日志字符串真实出处、兜底分支、21 条静态可预判失败点、第 10 章 `.5` 增量 |
 
-这两份是**工具的判读说明书**；验收口径与合格判定仍以 `docs/实机验收清单-v0.7.9-community.5.md` 为准。
+这两份是**工具的判读说明书**；验收口径与合格判定仍以 `docs/实机验收清单-v0.7.9-community.5.md` 为准，并记录实际被测标签或完整提交号。工具的 19 项筛查不是 L/M/N 实机用例计数，也不等于全量验收。
 
 ## 三态与退出码
 
@@ -122,7 +122,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\Check-Evidence.ps1
 
 ```powershell
 cd regression
-python build_fixtures.py     # 生成 19 个合成 fixture
+python build_fixtures.py     # 生成合成日志样本，不需要连接 Kobo
 python audit.py              # 源码字符串 / 纯 ASCII / 文档一致性
 powershell -NoProfile -ExecutionPolicy Bypass -File .\run-regression.ps1
 ```

@@ -9,7 +9,7 @@
 ```powershell
 cd tools\acceptance\regression
 
-# (1) 生成 19 个 fixture（幂等，会重建 cases/）
+# (1) 生成合成日志样本（幂等，会重建 cases/）
 python build_fixtures.py
 
 # (2) 静态审计：源码字符串 / 纯 ASCII / 只读令牌 / 文档一致性
@@ -34,7 +34,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\run-regression.ps1 -RunTag
 - 跑 `audit.py` 的 **source** 检查需要本地有 reeden-kobo 的 git 克隆。查找顺序：环境变量 `REEDEN_REPO` → 从本目录向上找含 `.git` 且含 `src/host.c` 的目录 → 当前工作目录向上。找不到时 source 检查降级，不会崩溃。
 - **不要**用 `powershell -File ... 2>&1 | Select-Object` 这类外层管道套着跑：中文路径下会触发子进程编码问题并导致假失败。直接 `& .\run-regression.ps1` 或 `-File` 不加管道。
 
-## 19 个 fixture
+## 合成日志样本
 
 | fixture | 用途 |
 | --- | --- |
@@ -50,6 +50,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\run-regression.ps1 -RunTag
 | `accepted-only` | 只有 `arm ... accepted=1`、无 `bands=` → `3.1` PASS 但 `3.2` NEED-EVIDENCE（`accepted=1` 不等于动画已下发） |
 | `color-sweep` | `.5` 只有彩色条带完成日志，无灰阶条带日志 → `3.2` PASS；不等于光学效果通过 |
 | `color-fallback` | `.5` 彩色实验未完成并关闭 → `3.2` FAIL，不能误报动画成功 |
+| `color-geometry-rejected` | main 先完成一页，再因条带几何不满足而回退：此前的成功日志不能掩盖这次未下发，3.2 判 FAIL，不代表普通彩色刷新失败 |
 | `frontlight-other-section` | `FrontLightLevel` 写在 `[PowerOptions]` 之外 → 两种模式结论一致且都不 FAIL |
 | `powerlog-rotated` | `power.log.1` / `guardian.log` 已轮转 → 验证证据副本被一并采集 |
 | `wifi-only` | 只有 `wifi.log` 有 Wi-Fi 证据 |

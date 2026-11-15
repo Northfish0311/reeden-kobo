@@ -4,6 +4,7 @@
 #include "cJSON.h"
 #include "light_panel.h"
 #include "power_worker.h"
+#include "power_key.h"
 #include "cover.h"
 #include "system_panel.h"
 #include <stdio.h>
@@ -470,7 +471,7 @@ int main(int argc,char **argv){
         .message=(const uint8_t*)lc,.message_size=strlen(lc)};
      fprintf(stderr,"[lifecycle] send result=%d\n",FlutterEngineSendPlatformMessage(engine,&lm));}
     FlutterEngineScheduleFrame(engine);
-    int power=-1;bool acquired=false,ready=false,power_down=false;
+    int power=-1;bool acquired=false,ready=false;PowerKey power_key={0};
     Cover cover={.fd=-1,.observed=-1,.reported=-1};
     char ready_path[4096],handoff[4096];snprintf(ready_path,sizeof(ready_path),"%s/state/ready",root);snprintf(handoff,sizeof(handoff),"%s/state/handoff",root);
     uint64_t escape_at=0;
@@ -504,9 +505,12 @@ int main(int argc,char **argv){
                 enum lock_result action=power_lock_result(status,wake_requested,retried_suspend,cover.reported==1);
                 if(sleeping&&action==LOCK_RESUME){
                     struct input_event stale[16];ssize_t bytes;
-                    while((bytes=read(power,stale,sizeof(stale)))>0)if(cover.shared_power)
-                        for(size_t i=0;i<(size_t)bytes/sizeof(*stale);i++)cover_event(&cover,&stale[i],monotonic_ns());
-                    power_down=false;
+                    while((bytes=read(power,stale,sizeof(stale)))>0)
+                        for(size_t i=0;i<(size_t)bytes/sizeof(*stale);i++){
+                            if(cover.shared_power)cover_event(&cover,&stale[i],monotonic_ns());
+                            (void)power_key_event(&power_key,power,&stale[i]);
+                        }
+                    power_key_end_wake_drain(&power_key);
                     set_sleep(&touch,false);
                 }else{
                     state_file("power-phase",false);
@@ -620,21 +624,7 @@ int main(int argc,char **argv){
         }
         if(fds[2].revents&POLLIN){struct input_event ev[8];ssize_t k=read(power,ev,sizeof(ev));for(size_t i=0;k>0&&i<(size_t)k/sizeof(*ev);i++){
             if(cover.shared_power)cover_event(&cover,&ev[i],monotonic_ns());
-            if(ev[i].type==EV_SYN&&ev[i].code==SYN_DROPPED){
-                /* The kernel dropped events, so the cached press may be a key
-                 * that was already released. Ask the device for the real state
-                 * instead of guessing, or the next press needs two releases to
-                 * register and the panel appears stuck. */
-                unsigned long bits[KEY_BIT_WORDS];
-                memset(bits,0,sizeof(bits));
-                power_down=ioctl(power,EVIOCGKEY(sizeof(bits)),bits)>=0&&
-                    ((bits[KEY_POWER/KEY_WORD_BITS]>>(KEY_POWER%KEY_WORD_BITS))&1);
-                fprintf(stderr,"[power] SYN_DROPPED; resynced key state down=%d\n",power_down?1:0);
-                continue;
-            }
-            if(ev[i].type!=EV_KEY||ev[i].code!=KEY_POWER)continue;
-            if(ev[i].value==1)power_down=true;
-            if(ev[i].value==0&&power_down){power_down=false;fprintf(stderr,"[power] key release\n");
+            if(power_key_event(&power_key,power,&ev[i])){fprintf(stderr,"[power] key release\n");
                 if(sleeping&&power_worker>0){wake_requested=true;state_file("power-cancel",true);fprintf(stderr,"[power] wake requested; waiting for hardware restoration\n");}
                 else set_sleep(&touch,!sleeping);
             }

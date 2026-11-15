@@ -249,6 +249,8 @@ $specs = @(
        Status=@{'3.1'='PASS';'3.2'='PASS'} },
     @{ Name='color-fallback'; Exit=2; Fail=@('3.2');
        Status=@{'3.1'='PASS';'3.2'='FAIL'} },
+    @{ Name='color-geometry-rejected'; Exit=2; Fail=@('3.2');
+       Status=@{'3.1'='PASS';'3.2'='FAIL'} },
     @{ Name='frontlight-other-section'; Exit=1; Fail=@();
        Status=@{'4.2'='NEED-EVIDENCE'} },
     # L3 fix: three-state stays NEED-EVIDENCE (Check logic unchanged), but the

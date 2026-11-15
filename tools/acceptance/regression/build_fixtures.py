@@ -219,6 +219,12 @@ CASES_DEF["color-fallback"] = base_files(
              "[color-turn] incomplete; experimental color sweep disabled for this session"],
     power=[], launcher=[], previous=[])
 
+CASES_DEF["color-geometry-rejected"] = base_files(
+    current=["[page-turn] arm type=1 forward=1 vertical=0 steps=16 accepted=1",
+             "[color-turn] bands=8 direction=next vertical=0 path=cfa wave=11 mode=1; optical quality unverified",
+             "[color-turn] band 0/8 rejected; experimental colour sweep disabled for this session"],
+    power=[], launcher=[], previous=[])
+
 # 11. -OutDir safety tests reuse a normal device layout.
 CASES_DEF["outdir-inside-appdir"] = base_files()
 CASES_DEF["outdir-equals-appdir"] = base_files()

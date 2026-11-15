@@ -5,7 +5,7 @@
 #       src/input.c:26 默认的 event1 确实是触摸，并预判 src/cover.c
 #       能否识别到 SW_LID 或 gpio-keys/ntx_event0 上的 KEY_F1。
 #       若没有任何内部设备上报 KEY_POWER，host.c 会退回 event2（与旧版一致），
-#       此时电源键不可用，不要在错误的设备上跑 C/D/F 组用例。
+#       回退不代表独占成功或按键可用，不要仅凭枚举输出跑 C/D/F 组用例。
 #
 # 用法（必须在【拔线、Nickel 主页】下执行；USB mass storage 时 NickelMenu 点不了）：
 #   1. 把本文件放到 E:\.adds\reeden-kobo\ 下（插 USB、点「连接」后复制）
@@ -43,7 +43,8 @@ outdir=$(dirname -- "$OUT")
   echo
   echo '=== structured view + verdict ==='
 
-  awk '
+  touch_node=${REEDEN_TOUCH:-/dev/input/event1}
+  awk -v touch_node="${touch_node##*/}" '
     function hexval(c) { return index("0123456789abcdef", tolower(c)) - 1 }
     function pow2(n,   r, i) { r = 1; for (i = 0; i < n; i++) r = r * 2; return r }
     # B: 行是十六进制位图：kernel input_print_bitmap() 从【最高字往前】打印，
@@ -88,7 +89,8 @@ outdir=$(dirname -- "$OUT")
         if (ev == "1" && (mt || name ~ /[Tt]ouch|cyttsp|epd|ft5|goodix|elan/)) event1_touch = 1
         # host.c 首选 event2，但只在它真的上报 KEY_POWER 时才直接用
         if (ev == "2" && pw) event2_power = 1
-        if (pw && internal && power_src == "") power_src = ev
+        if (pw && internal && ev != "2" && h[i] != touch_node && ev+0 < 32 &&
+            (!have_power || ev+0 < power_src)) { power_src = ev+0; have_power = 1 }
         # cover_open() 遇到 EV_SW 就 break，SW_LID 优先于 gpio-keys KEY_F1
         if (lid) cover_src = ev ":SW_LID"
         else if (gpio && cover_src == "") cover_src = ev ":internal KEY_F1"
@@ -105,9 +107,9 @@ outdir=$(dirname -- "$OUT")
     END {
       emit()
       print "---"
-      if (event2_power) print "PASS  event2 reports KEY_POWER -> host.c takes it directly and never scans"
-      else if (power_src != "") print "PASS  KEY_POWER is on event" power_src " (internal bus) -> host.c scans and takes it; expect [power] exclusive power key acquired (event" power_src " scanned ...)"
-      else print "STOP  no internal device reports KEY_POWER -> host.c falls back to event2, so the power key will not sleep or exit; rely on the both-corner touch escape and do NOT run C/D/F cases"
+      if (event2_power) print "CANDIDATE event2 reports KEY_POWER; confirm the actual grab in the host log"
+      else if (have_power) print "CANDIDATE event" power_src " reports KEY_POWER on an internal bus; the host may reject a busy node or a touch alias; check the host log"
+      else print "STOP  no eligible KEY_POWER candidate in this enumeration; a legacy event2 fallback is not proof of a working key; do NOT run power key tests"
       if (event1_touch) print "PASS  event1 matches src/input.c:26 (touch)"
       else              print "WARN  event1 is not recognisably touch -> set REEDEN_TOUCH before testing"
       if (cover_src != "") print "INFO  cover.c candidate expected at " cover_src

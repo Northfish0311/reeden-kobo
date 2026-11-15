@@ -294,7 +294,8 @@ $checkDefs = @(
 
     @{ Id = '3.2'; Name = 'Water-ripple animation actually submitted'; Groups = @('current', 'previous');
        Pos = @('\[page-turn\] bands=', '\[page-turn\] submissions=', '\[color-turn\] bands=[2-8] .*path=cfa wave=11 mode=1');
-       Neg = @('\[display-sequence\] (cancelled|submission failed)', '\[color-turn\] incomplete;');
+       Neg = @('\[display-sequence\] (cancelled|submission failed)', '\[color-turn\] incomplete;',
+               '\[color-turn\] band \d+/\d+ rejected;');
        Fallback = @('\[page-turn\] invalid experiment configuration; stable profile retained');
        RequireAll = $false;
        Hint = 'accepted=1 alone is NOT proof of animation. Colour needs the opt-in .5 color profile; off and cleans skip sweeps. Logs do not prove optical quality.' },
